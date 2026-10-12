@@ -1,0 +1,1 @@
+// Offline chatbot widget placeholder.

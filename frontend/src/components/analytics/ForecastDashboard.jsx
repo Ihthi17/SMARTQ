@@ -1,0 +1,1 @@
+// Forecast dashboard component placeholder.

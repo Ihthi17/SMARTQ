@@ -1,0 +1,1 @@
+// Token display component placeholder.
