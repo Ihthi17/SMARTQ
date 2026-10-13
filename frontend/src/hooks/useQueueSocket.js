@@ -19,7 +19,7 @@ export const useQueueSocket = (providerId, branchCode, serviceCode, queueDate, i
     const utcDate = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
     const dateStr = utcDate.toISOString().slice(0, 10);
     
-    const roomId = `${providerId}:${String(branchCode || '').toUpperCase()}:${String(serviceCode || '').toUpperCase()}:${dateStr}`;
+    const roomId = `queue:${providerId}:${String(branchCode || '').toUpperCase()}:${String(serviceCode || '').toUpperCase()}:${dateStr}`;
     
     socket.on('connect', () => {
       setConnected(true);
