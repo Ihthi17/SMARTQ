@@ -4,7 +4,8 @@ import app from './app.js';
 import { connectDatabase } from './config/db.js';
 import { configureSocket } from './config/socket.js';
 import { seedSuperAdmin } from './utils/seedSuperAdmin.js';
-import { seedSettings }   from './modules/settings/settings.seed.js';
+import { seedSettings } from './modules/settings/settings.seed.js';
+import { seedProvidersAndServices } from './modules/providers/providers.seed.js';
 import { registerCronJobs } from './jobs/cronJobs.js';
 import { startAutomaticBackupScheduler } from './modules/settings/backup.service.js';
 import { startAuditRetentionScheduler } from './modules/settings/audit.service.js';
@@ -26,6 +27,7 @@ const startServer = async () => {
   await connectDatabase();
   await seedSuperAdmin();
   await seedSettings();
+  await seedProvidersAndServices();
   registerCronJobs();
   startAutomaticBackupScheduler();
   startAuditRetentionScheduler();

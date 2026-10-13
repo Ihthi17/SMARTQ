@@ -40,6 +40,12 @@ export default function ProviderManagement() {
     setLoading(true);
     try {
       const { data } = await api.get('/services');
+      console.log('[load] Services fetched from API:', data);
+      data.forEach(service => {
+        if (service.requirements && service.requirements.length > 0) {
+          console.log(`[load] Service ${service.code} has requirements:`, service.requirements);
+        }
+      });
       setServices(data);
     } catch (error) {
       toast.error(error.response?.data?.message || 'Could not load services');
@@ -53,8 +59,17 @@ export default function ProviderManagement() {
   useEffect(() => {
     // Services are assigned to Locations. Load active locations for the dropdown.
     api.get('/locations')
-      .then(({ data }) => setLocations(Array.isArray(data) ? data.filter(loc => loc.isActive) : []))
-      .catch(error => toast.error(error.response?.data?.message || 'Could not load service locations'));
+      .then(({ data }) => {
+        const activeLocations = Array.isArray(data) ? data.filter(loc => loc.isActive) : [];
+        setLocations(activeLocations);
+        if (activeLocations.length === 0) {
+          console.warn('[Service Management] No active locations found. Services cannot be assigned to a location.');
+        }
+      })
+      .catch(error => {
+        console.error('[Service Management] Failed to load locations:', error);
+        toast.error(error.response?.data?.message || 'Could not load service locations');
+      });
     // Still load providers for legacy display mapping (optional).
     api.get('/providers')
       .then(({ data }) => setProviders(Array.isArray(data) ? data : []))
@@ -110,6 +125,13 @@ export default function ProviderManagement() {
 
   const saveService = async event => {
     event.preventDefault();
+    
+    // Validate that location is selected
+    if (!form.providerId) {
+      toast.error('Please select a service location before saving.');
+      return;
+    }
+    
     setBusy(true);
     const payload = {
       ...form,
@@ -140,8 +162,17 @@ export default function ProviderManagement() {
   }));
 
   const openRequirements = service => {
-    setSelected(service);
-    setRequirements(service.requirements || []);
+    // Find the fresh service object from the loaded services array to ensure we have latest data
+    const freshService = services.find(s => s.code === service.code);
+    const serviceToUse = freshService || service;
+    
+    console.log('[openRequirements] Original service:', service);
+    console.log('[openRequirements] Fresh service from array:', freshService);
+    console.log('[openRequirements] Service being used:', serviceToUse);
+    console.log('[openRequirements] Service requirements:', serviceToUse.requirements);
+    
+    setSelected(serviceToUse);
+    setRequirements(serviceToUse.requirements || []);
     setRequirementDraft(emptyRequirement);
     setDialog('requirements');
   };
@@ -165,21 +196,64 @@ export default function ProviderManagement() {
   };
 
   const saveRequirements = async () => {
+    // If there's unsaved draft, add it first
+    let requirementsToSave = [...requirements];
+    const draftLabel = requirementDraft.label.trim();
+    
+    if (draftLabel) {
+      // Build requirement from draft (same logic as addRequirement)
+      const name = draftLabel.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+      
+      // Validate
+      if (!/^[a-z][a-z0-9_]{0,39}$/.test(name)) {
+        toast.error('Requirement label must produce a valid field name.');
+        return;
+      }
+      if (requirementsToSave.some(field => field.name === name)) {
+        toast.error('A requirement with this label already exists.');
+        return;
+      }
+      const options = requirementDraft.options.split(',').map(option => option.trim()).filter(Boolean);
+      if (requirementDraft.type === 'select' && options.length === 0) {
+        toast.error('Add at least one dropdown option.');
+        return;
+      }
+      
+      // Add the draft requirement to the save list
+      requirementsToSave = [...requirementsToSave, {
+        name,
+        label: draftLabel,
+        type: requirementDraft.type,
+        required: requirementDraft.required,
+        options,
+      }];
+    }
+    
     setBusy(true);
     try {
-      await api.patch(`/services/${encodeURIComponent(selected.code)}`, {
+      const payload = {
         name: selected.name,
-        location: selected.location || selected.providerId || '',
+        location: selected.location?._id || selected.location || selected.providerId || '',
         description: selected.description || '',
         channels: selected.channels || ['appointments', 'queue'],
         durationMinutes: selected.durationMinutes || 15,
         requiresDateTime: selected.requiresDateTime !== false,
         isActive: selected.isActive,
-        requirements,
-      });
+        requirements: requirementsToSave,
+      };
+      const response = await api.patch(`/services/${encodeURIComponent(selected.code)}`, payload);
+      
+      // Update services list with fresh data from response
+      setServices(services.map(s => 
+        s.code === selected.code ? response.data : s
+      ));
+      
+      // Clear draft
+      setRequirementDraft(emptyRequirement);
+      
       toast.success('Service requirements saved');
       setDialog('');
-      await load();
+      setSelected(null);
     } catch (error) {
       toast.error(error.response?.data?.message || 'Could not save service requirements');
     } finally {
@@ -190,9 +264,12 @@ export default function ProviderManagement() {
   const setServiceStatus = async service => {
     const isActive = !service.isActive;
     
-    // When deactivating, ensure location is set
-    if (!isActive && !service.location && !service.providerId) {
-      toast.error('Service must be assigned to a location before it can be deactivated. Please edit the service to assign it to a location.');
+    // Extract location ID - it might be an object (from populate) or a string ID
+    const locationId = service.location?._id || service.location || service.providerId || '';
+    
+    // When activating, ensure location is set
+    if (isActive && !locationId) {
+      toast.error('Service must be assigned to a location before it can be activated. Please edit the service to assign it to a location.');
       return;
     }
     
@@ -200,7 +277,8 @@ export default function ProviderManagement() {
       await api.patch(`/services/${encodeURIComponent(service.code)}`, {
         name: service.name,
         // Send the Location id so the backend's location validation passes.
-        location: service.location || service.providerId || '',
+        // If deactivating and no location set, allow it (send empty string)
+        location: locationId,
         description: service.description || '',
         channels: service.channels || ['appointments', 'queue'],
         durationMinutes: service.durationMinutes || 15,
@@ -274,6 +352,9 @@ export default function ProviderManagement() {
                     <td className="px-5 py-4">
                       <span className="font-semibold text-slate-900">{service.name}</span>
                       <span className="mt-1 block text-xs text-slate-500">{service.code}</span>
+                      {service.requirements && service.requirements.length > 0 && (
+                        <span className="mt-2 inline-block rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-700 font-medium">{service.requirements.length} requirement{service.requirements.length !== 1 ? 's' : ''}</span>
+                      )}
                     </td>
                     <td className="px-5 py-4 text-slate-700">{locations.find(location => location._id === String(service.location))?.name || service.locationName || service.providerName || 'Location required'}</td>
                     <td className="px-5 py-4">
@@ -330,11 +411,15 @@ export default function ProviderManagement() {
                 <input value={form.code} onChange={event => setForm(current => ({ ...current, code: event.target.value.toUpperCase() }))} maxLength={40} pattern="[A-Z0-9][A-Z0-9_-]{1,39}" required disabled={Boolean(selected)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2.5 disabled:bg-slate-50" />
               </label>
               <label className="text-sm font-medium text-slate-700 sm:col-span-2">Service location
-                <select value={form.providerId} onChange={event => setForm(current => ({ ...current, providerId: event.target.value }))} required className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2.5">
-                  <option value="">Choose the location that provides this service</option>
+                <select value={form.providerId} onChange={event => setForm(current => ({ ...current, providerId: event.target.value }))} required disabled={locations.length === 0} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2.5 disabled:bg-slate-50 disabled:opacity-60">
+                  <option value="">{locations.length === 0 ? 'No locations available' : 'Choose the location that provides this service'}</option>
                   {locations.map(location => <option key={location._id} value={location._id}>{location.name} ({location.code})</option>)}
                 </select>
-                {locations.length === 0 && <span className="mt-1 block text-xs text-amber-600">No active locations found. Create one in Location Management first.</span>}
+                {locations.length === 0 && (
+                  <span className="mt-2 block rounded-lg bg-amber-50 p-2 text-xs text-amber-700 border border-amber-200">
+                    ⚠️ No active locations found. <a href="/admin/locations" className="font-semibold underline">Create a location in Location Management first</a> before creating services.
+                  </span>
+                )}
               </label>
               <label className="text-sm font-medium text-slate-700 sm:col-span-2">Description
                 <textarea value={form.description} onChange={event => setForm(current => ({ ...current, description: event.target.value }))} maxLength={500} rows={3} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2.5" />

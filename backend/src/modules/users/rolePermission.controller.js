@@ -5,7 +5,6 @@ import { User } from './user.model.js';
 const builtInRoles = [
   { role: 'admin', label: 'Admin', systemRole: true },
   { role: 'staff', label: 'Staff', systemRole: true },
-  { role: 'customer', label: 'Customer', systemRole: true },
 ];
 
 const roleSlug = (label) => `custom_${label.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')}`;

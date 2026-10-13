@@ -16,11 +16,10 @@ export const PERMISSION_DEFINITIONS = [
 export const DEFAULT_ROLE_PERMISSIONS = {
   admin: PERMISSION_DEFINITIONS.map(({ key }) => key),
   staff: ['appointments.view', 'appointments.manage', 'queue.view', 'queue.manage'],
-  customer: [],
 };
 
 const rolePermissionSchema = new mongoose.Schema({
-  role: { type: String, required: true, unique: true, match: /^(admin|staff|customer|custom_[a-z0-9_]+)$/ },
+  role: { type: String, required: true, unique: true, match: /^(admin|staff|custom_[a-z0-9_]+)$/ },
   label: { type: String, required: true, trim: true, maxlength: 80 },
   systemRole: { type: Boolean, default: false },
   permissions: [{ type: String, enum: PERMISSION_DEFINITIONS.map(({ key }) => key) }],

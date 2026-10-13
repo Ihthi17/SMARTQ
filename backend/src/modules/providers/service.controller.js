@@ -10,7 +10,7 @@ const serviceCodePattern = /^[A-Z0-9][A-Z0-9_-]{1,39}$/;
 const validChannels = new Set(['appointments', 'queue']);
 const validFieldTypes = new Set(['text', 'textarea', 'email', 'tel', 'number', 'date', 'select', 'checkbox', 'file']);
 
-const normalizeService = (body, { creating = false } = {}) => {
+const normalizeService = (body, { creating = false, deactivating = false } = {}) => {
   const name = typeof body?.name === 'string' ? body.name.trim() : '';
   const code = String(body?.code || '').trim().toUpperCase();
   const providerId = String(body?.providerId || '').trim();
@@ -26,7 +26,9 @@ const normalizeService = (body, { creating = false } = {}) => {
   // The "Service location" dropdown sends a Location _id. For backward compatibility
   // we also accept it under `providerId`. Location is the source of truth.
   const finalLocation = location || providerId;
-  if (!mongoose.isValidObjectId(finalLocation)) {
+  
+  // Location is required when creating or activating (not deactivating) - must be a valid ObjectId
+  if (!deactivating && (!finalLocation || !mongoose.isValidObjectId(finalLocation))) {
     throw Object.assign(new Error('Choose a service location for this service.'), { statusCode: 400 });
   }
   // providerId is optional now; only keep it if it is a real ObjectId
@@ -49,6 +51,7 @@ const normalizeService = (body, { creating = false } = {}) => {
       const label = String(field?.label || '').trim();
       const type = field?.type || 'text';
       const options = field?.options ?? [];
+      
       if (!/^[a-zA-Z][a-zA-Z0-9_]{0,39}$/.test(fieldName) || seenNames.has(fieldName) ||
           !label || label.length > 100 || !validFieldTypes.has(type) || !Array.isArray(options) ||
           options.length > 50 || (type === 'select' && options.length === 0)) {
@@ -68,13 +71,13 @@ const normalizeService = (body, { creating = false } = {}) => {
     ...(creating ? { code } : {}),
     name,
     ...(finalProviderId ? { providerId: finalProviderId } : {}),
-    location: finalLocation,
+    ...(mongoose.isValidObjectId(finalLocation) ? { location: finalLocation } : {}),
     description,
     channels: normalizedChannels,
     durationMinutes,
     // Always persist on create (default true); on update only when provided
     ...(creating ? { requiresDateTime: requiresDateTime ?? true } : (requiresDateTime !== undefined ? { requiresDateTime } : {})),
-    ...(requirements ? { requirements } : {}),
+    ...(requirements !== undefined ? { requirements } : {}),
   };
 };
 
@@ -110,7 +113,7 @@ export const listServices = async (req, res, next) => {
     const savedWithLocation = saved.map(service => {
       const provider = providersById.get(String(service.providerId)) || (!service.providerId && providerForCode(service.code));
       const loc = locationsById.get(String(service.location)) || null;
-      return {
+      const mapped = {
         ...service,
         providerId: provider?._id || '',
         providerName: provider?.name || '',
@@ -119,6 +122,11 @@ export const listServices = async (req, res, next) => {
         locationCode: loc?.code || '',
         locationAddress: loc?.address || '',
       };
+      // Debug log for services with requirements
+      if (service.requirements && service.requirements.length > 0) {
+        console.log(`[listServices] Service ${service.code} has ${service.requirements.length} requirements:`, service.requirements);
+      }
+      return mapped;
     });
     const savedCodes = new Set(saved.map(service => service.code));
     const legacyRows = [...legacy.values()]
@@ -261,11 +269,20 @@ export const updateService = async (req, res, next) => {
     // but it is actually a Location _id. Location is the source of truth.
     const incomingLocation = req.body?.location || req.body?.providerId || service?.location;
     
-    // When deactivating, ensure location is specified
+    // When creating or updating to active status, ensure location is specified
     const isDeactivating = req.body?.isActive === false;
-    if (isDeactivating && !incomingLocation) {
-      return res.status(400).json({ message: 'Choose a service location for this service before deactivating it.' });
+    const isCreating = !service;
+    const isActivating = !isDeactivating && req.body?.isActive === true;
+    
+    // Require location only when creating or explicitly activating
+    if ((isCreating || isActivating) && !incomingLocation) {
+      return res.status(400).json({ message: 'Choose a service location for this service.' });
     }
+    
+    // Ensure requirements fallback is properly passed to normalizeService
+    const incomingRequirements = req.body?.requirements !== undefined 
+      ? req.body.requirements 
+      : (service?.requirements || []);
     
     const updates = normalizeService({
       ...req.body,
@@ -276,7 +293,9 @@ export const updateService = async (req, res, next) => {
       name: req.body?.name || service?.name || displayNameFromCode(code),
       durationMinutes: req.body?.durationMinutes ?? service?.durationMinutes ?? 15,
       channels: req.body?.channels ?? service?.channels ?? ['appointments', 'queue'],
-    });
+      // Always include requirements (new, existing, or empty array)
+      requirements: incomingRequirements,
+    }, { deactivating: isDeactivating });
     
     const locationDoc = await Location.findById(updates.location);
     if (!locationDoc && !isDeactivating) {
@@ -288,9 +307,14 @@ export const updateService = async (req, res, next) => {
       if (resolvedProviderId) updates.providerId = resolvedProviderId;
     }
     if (req.body?.isActive !== undefined) updates.isActive = req.body.isActive;
+    
     const saved = service
       ? await Service.findOneAndUpdate({ code }, { $set: updates }, { new: true, runValidators: true })
       : await Service.create({ code, ...updates, isActive: updates.isActive ?? true });
+    
+    // Log the saved service with requirements
+    console.log(`[updateService] Service ${code} updated. Requirements in saved document:`, saved.requirements);
+    
     await registerServiceOnProvider(updates.providerId, code);
     await writeAuditLog(req, { action: 'service.updated', resource: 'service', resourceId: saved._id, details: { code, fields: Object.keys(updates) } });
     return res.json(saved);

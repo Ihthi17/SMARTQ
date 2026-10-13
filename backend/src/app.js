@@ -23,10 +23,15 @@ app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.use(express.json({
   limit: '6mb',
   type: (request) => {
-    // Exclude backup restore endpoint and file upload endpoints from JSON parsing
+    // Don't parse as JSON if it's multipart/form-data
+    const contentType = request.headers['content-type'] || '';
+    if (contentType.includes('multipart/form-data')) return false;
+    
+    // Exclude backup restore endpoint
     if (request.path === '/api/settings/backup/restore') return false;
+    
+    // For appointments, exclude paths with file uploads
     if (request.path.startsWith('/api/appointments/')) {
-      // Allow JSON for most appointment endpoints, only exclude file uploads
       if (request.path.includes('/upload') || request.path.includes('/requirements')) return false;
       return true;
     }

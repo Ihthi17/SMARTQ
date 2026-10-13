@@ -16,10 +16,10 @@ const userSchema = new mongoose.Schema(
     role: {
       type: String,
       validate: {
-        validator: (role) => ['SUPER_ADMIN', 'admin', 'staff', 'customer'].includes(role) || /^custom_[a-z0-9_]+$/.test(role),
+        validator: (role) => ['SUPER_ADMIN', 'admin', 'staff'].includes(role) || /^custom_[a-z0-9_]+$/.test(role),
         message: 'Role must be a predefined role or an active custom role.',
       },
-      default: 'customer',
+      default: 'staff',
       index: true,
     },
     status: {

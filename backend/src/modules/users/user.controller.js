@@ -3,7 +3,7 @@ import { RolePermission } from './rolePermission.model.js';
 import { writeAuditLog } from '../settings/audit.service.js';
 
 const validateAssignableRole = async (role) => {
-  if (['SUPER_ADMIN', 'admin', 'staff', 'customer'].includes(role)) return true;
+  if (['SUPER_ADMIN', 'admin', 'staff'].includes(role)) return true;
   if (!/^custom_[a-z0-9_]+$/.test(role || '')) return false;
   return Boolean(await RolePermission.exists({ role }));
 };
@@ -94,7 +94,7 @@ export const createUser = async (req, res, next) => {
     const { name, username, email, password, role, phone, status } = req.body;
     if (!username || !email || !password)
       return res.status(400).json({ message: 'username, email and password are required' });
-    if (!await validateAssignableRole(role || 'customer')) {
+    if (!await validateAssignableRole(role || 'staff')) {
       return res.status(400).json({ message: 'Choose an existing assignable role.' });
     }
     if (role === 'SUPER_ADMIN' && req.user.role !== 'SUPER_ADMIN') {
