@@ -515,3 +515,98 @@ export const getStaffPerformanceAnalytics = async (req, res, next) => {
     next(error);
   }
 };
+
+
+/**
+ * GET /api/analytics/dashboard/summary
+ * Quick summary metrics for admin dashboard
+ * Metrics: total users, active queue, today's appointments, completed, cancelled, no-shows, avg wait time
+ */
+export const getDashboardSummary = async (req, res, next) => {
+  try {
+    const { User } = await import('../users/user.model.js');
+    
+    // Get date range for today (UTC)
+    const now = new Date();
+    const startOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const endOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+
+    // Fetch counts in parallel
+    const [
+      totalUsers,
+      activeUsers,
+      todaysAppointments,
+      completedToday,
+      cancelledToday,
+      noShowsToday,
+      queuedAppointments,
+    ] = await Promise.all([
+      User.countDocuments(),
+      User.countDocuments({ status: 'ACTIVE' }),
+      Appointment.countDocuments({
+        scheduledStart: { $gte: startOfDay, $lt: endOfDay },
+      }),
+      Appointment.countDocuments({
+        status: 'completed',
+        completedAt: { $gte: startOfDay, $lt: endOfDay },
+      }),
+      Appointment.countDocuments({
+        status: 'cancelled',
+        cancelledAt: { $gte: startOfDay, $lt: endOfDay },
+      }),
+      Appointment.countDocuments({
+        status: 'no_show',
+        scheduledStart: { $gte: startOfDay, $lt: endOfDay },
+      }),
+      Appointment.countDocuments({
+        status: 'queued',
+      }),
+    ]);
+
+    // Get role breakdown
+    const roleBreakdown = await User.aggregate([
+      { $match: { status: 'ACTIVE' } },
+      { $group: { _id: '$role', count: { $sum: 1 } } },
+    ]);
+
+    const activeRoles = {
+      admin: roleBreakdown.find(r => r._id === 'admin')?.count || 0,
+      staff: roleBreakdown.find(r => r._id === 'staff')?.count || 0,
+      SUPER_ADMIN: roleBreakdown.find(r => r._id === 'SUPER_ADMIN')?.count || 0,
+    };
+
+    // Calculate average wait time for today
+    const completedAppointmentsToday = await Appointment.find({
+      status: 'completed',
+      completedAt: { $gte: startOfDay, $lt: endOfDay },
+      queueJoinedAt: { $ne: null },
+      calledAt: { $ne: null },
+    }).lean();
+
+    let avgWaitTime = 0;
+    if (completedAppointmentsToday.length > 0) {
+      const totalWaitTime = completedAppointmentsToday.reduce((sum, a) => {
+        const wt = calculateWaitTime(a);
+        return sum + (wt !== null ? wt : 0);
+      }, 0);
+      avgWaitTime = Math.round(totalWaitTime / completedAppointmentsToday.length);
+    }
+
+    return res.json({
+      metrics: {
+        totalUsers,
+        activeUsers,
+        activeRoles,
+        todaysAppointments,
+        completedToday,
+        cancelledToday,
+        noShowsToday,
+        activeQueueCount: queuedAppointments,
+        avgWaitTimeMinutes: avgWaitTime,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    next(error);
+  }
+};

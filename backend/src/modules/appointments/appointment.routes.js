@@ -3,7 +3,7 @@ import { protect, optionalProtect, authorizePermission } from '../../middlewares
 import {
   listProviders, listStaff, create, listMine, listAll, checkIn, getStatus, setPriority, cancel, updateAppointment,
   staffCheckIn, sendAppointmentAlert, deleteAppointment, sendNotification, getNotificationHistory, reject,
-  confirmAppointment, getQrToken, refreshQrToken, scanQrToken, checkInAppointment, manualCheckIn,
+  confirmAppointment, getQrImage, getQrCode, refreshQrToken, scanQrToken, validateCheckInCode, checkInByCode, checkInAppointment, manualCheckIn,
   downloadRequirementFile,
 } from './appointment.controller.js';
 import {
@@ -45,9 +45,12 @@ router.post('/:id/reject', ...manageAppointments, reject);
 
 // QR Check-in endpoints (Part 3)
 router.patch('/:id/confirm', ...manageAppointments, confirmRateLimiter, confirmAppointment);
-router.get('/:id/qr', protect, qrTokenRateLimiter, getQrToken);
+router.get('/:id/qr-image/:token', getQrImage);  // Get dynamic QR image (public, token-protected)
+router.get('/:id/qr/:token', getQrCode);         // Get dynamic QR code with countdown (public, token-protected)
 router.post('/:id/refresh-qr', protect, qrTokenRateLimiter, refreshQrToken);
 router.post('/scan', ...manageAppointments, scanRateLimiter, scanQrToken);
+router.post('/checkin-by-code', ...manageAppointments, checkInByCode);  // Check-in using 8-digit code
+router.post('/validate-code', ...manageAppointments, validateCheckInCode);
 router.post('/:id/checkin', ...manageAppointments, checkInRateLimiter, checkInAppointment);
 router.patch('/:id/manual-checkin', ...manageAppointments, checkInRateLimiter, manualCheckIn);
 

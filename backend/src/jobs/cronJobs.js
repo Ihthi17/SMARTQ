@@ -32,6 +32,59 @@ const registerAutoDeleteAppointments = () => {
 };
 
 /**
+ * Auto-regenerate QR codes every minute for confirmed appointments
+ * Generates new QR code every 60 seconds and updates both qrToken and qrExpiresAt
+ */
+const registerAutoRefreshQrCodes = () => {
+  cron.schedule('* * * * *', async () => {
+    try {
+      const now = new Date();
+      
+      // Find confirmed appointments where QR has expired (or will expire within 5 seconds)
+      const appointmentsNeedingRefresh = await Appointment.find({
+        status: 'confirmed',
+        qrExpiresAt: { $lte: now },
+        qrToken: { $exists: true },
+      }).select('_id branchCode qrToken usedQrCodes');
+
+      if (appointmentsNeedingRefresh.length === 0) return;
+
+      for (const appointment of appointmentsNeedingRefresh) {
+        try {
+          // Generate new 8-digit check-in code
+          const newCode = String(Math.floor(10000000 + Math.random() * 90000000));
+          const newExpiresAt = new Date(now.getTime() + 60 * 1000);
+          
+          // Update appointment with new QR code
+          // Track old code in usedQrCodes to prevent replay attacks
+          await Appointment.findByIdAndUpdate(
+            appointment._id,
+            {
+              $set: {
+                qrToken: newCode,
+                qrGeneratedAt: now,
+                qrExpiresAt: newExpiresAt,
+              },
+              $push: {
+                usedQrCodes: appointment.qrToken, // Track old code as used
+              },
+            }
+          );
+        } catch (err) {
+          console.error(`Failed to refresh QR for appointment ${appointment._id}:`, err);
+        }
+      }
+
+      if (appointmentsNeedingRefresh.length > 0) {
+        console.log(`[Cron] Auto-refreshed QR codes for ${appointmentsNeedingRefresh.length} confirmed appointments`);
+      }
+    } catch (error) {
+      console.error('[Cron] Error in auto-refresh QR codes job:', error);
+    }
+  });
+};
+
+/**
  * Handle no-show appointments (checkInExpiresAt passed, still confirmed)
  * Status: confirmed -> no_show (every 5 minutes)
  */
@@ -177,6 +230,7 @@ export const registerCronJobs = () => {
   try {
     registerAutoDeleteAppointments();
     registerCleanupQueueSessions();
+    registerAutoRefreshQrCodes(); // New: Auto-refresh QR codes every minute
     registerHandleNoShowAppointments();
     registerHandleExpiredAppointments();
     registerQueueNumberReset();

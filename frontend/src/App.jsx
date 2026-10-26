@@ -9,6 +9,9 @@ import ForgotPassword  from './pages/ForgotPassword';
 import ChangePassword  from './pages/ChangePassword';
 import ResetPassword   from './pages/ResetPassword';
 
+// ── Public pages ──────────────────────────────────────────────────
+import PublicQrPage   from './pages/PublicQrPage';
+
 // ── Admin pages ───────────────────────────────────────────────────
 import AdminDashboard  from './pages/admin/AdminDashboard';
 import SettingsPage    from './pages/admin/SettingsPage';
@@ -22,7 +25,6 @@ import QueueAnalytics from './pages/admin/QueueAnalytics';
 import QueueControl from './pages/staff/QueueControl';
 import Home from './pages/customer/Home';
 import BookAppointment from './pages/customer/BookAppointment';
-import MyTokenStatus from './pages/customer/MyTokenStatus';
 import QueueStatus from './pages/customer/QueueStatus';
 import QueueDisplayPage from './pages/QueueDisplayPage';
 import api from './api/axiosInstance';
@@ -121,9 +123,9 @@ const App = () => {
       <Route path="/forgot-password"element={<ForgotPassword />} />
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/book-appointment" element={<BookAppointment />} />
-      <Route path="/check-in" element={<MyTokenStatus />} />
       <Route path="/queue-status/:appointmentId" element={<QueueStatus />} />
       <Route path="/queue-display" element={<QueueDisplayPage />} />
+      <Route path="/qr/:id/:token" element={<PublicQrPage />} />
 
       {/* ── Must-change-password (authenticated) ─ */}
       <Route path="/change-password"

@@ -14,6 +14,7 @@ import providerRoutes from './modules/providers/provider.routes.js';
 import serviceRoutes from './modules/providers/service.routes.js';
 import locationRoutes from './modules/locations/location.routes.js';
 import analyticsRoutes from './modules/analytics/analytics.routes.js';
+import predictionRoutes from './modules/ai/prediction/prediction.routes.js';
 
 const app = express();
 
@@ -51,6 +52,7 @@ app.use('/api/providers', providerRoutes);
 app.use('/api/services', serviceRoutes);
 app.use('/api/locations', locationRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/predictions', predictionRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

@@ -246,15 +246,21 @@ export default function AppointmentQrPage() {
                   />
                 </div>
 
-                {/* Token Countdown */}
-                <div className="flex items-center justify-center gap-2">
-                  <div className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium ${
-                    isLateInWindow
-                      ? 'bg-red-100 text-red-700'
-                      : 'bg-teal-100 text-teal-700'
-                  }`}>
-                    <Clock size={14} />
-                    Valid for: <span className="font-bold">{tokenRefreshCountdown}s</span>
+                {/* Countdown & Code */}
+                <div className="w-full space-y-3 rounded-lg bg-teal-50 p-4">
+                  <div className="flex items-center justify-center gap-2">
+                    <div className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium ${
+                      tokenRefreshCountdown < 15
+                        ? 'bg-red-100 text-red-700'
+                        : 'bg-teal-100 text-teal-700'
+                    }`}>
+                      <Clock size={14} />
+                      Valid for: <span className="font-bold">{tokenRefreshCountdown}s</span>
+                    </div>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-xs text-slate-600 mb-1">8-Digit Code (if QR can't scan):</p>
+                    <p className="text-3xl font-bold font-mono text-teal-700 tracking-widest">{qrToken}</p>
                   </div>
                 </div>
 

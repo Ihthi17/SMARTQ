@@ -55,9 +55,17 @@ export default function ScannerPage() {
   const handleScan = async (token) => {
     setLoading(true);
     try {
-      const { data } = await api.post('/admin/scan', { token });
-      setPreview(data);
-      toast.success('Appointment found');
+      // If it's an 8-digit code, use the 8-digit endpoint
+      if (/^\d{8}$/.test(token.trim())) {
+        const { data } = await api.post('/appointments/checkin-by-code', { code: token.trim() });
+        setPreview(data.appointment);
+        toast.success('Appointment found');
+      } else {
+        // Otherwise try JWT token endpoint
+        const { data } = await api.post('/appointments/scan', { token });
+        setPreview(data);
+        toast.success('Appointment found');
+      }
     } catch (error) {
       setScanning(true);
       const msg = error.response?.data?.message || 'Invalid or expired QR code';
@@ -73,9 +81,11 @@ export default function ScannerPage() {
 
     setLoading(true);
     try {
-      const { data } = await api.post(`/admin/checkin/${preview.appointmentId}`, {});
-      toast.success(`Check-in successful! Queue #${data.appointment.queueNumber}`);
-      setCheckedInQueueNumber(data.appointment.queueNumber);
+      // Use the appointmentId from preview (works for both endpoints)
+      const appointmentId = preview.appointmentId || preview._id;
+      const { data } = await api.post(`/appointments/${appointmentId}/checkin`, {});
+      toast.success(`Check-in successful! Token: ${data.appointment.tokenLabel}`);
+      setCheckedInQueueNumber(data.appointment.queueNumber || data.appointment.tokenLabel);
       setPreview(null);
 
       // Auto-reset after 3 seconds
@@ -92,12 +102,40 @@ export default function ScannerPage() {
 
   const handleManualScan = async () => {
     if (!manualToken.trim()) {
-      toast.error('Enter a QR token');
+      toast.error('Enter a QR token or check-in code');
       return;
     }
 
     setManualToken('');
-    await handleScan(manualToken.trim());
+    
+    // Try both JWT token scan and 8-digit code check-in
+    const trimmed = manualToken.trim();
+    
+    // If it's 8 digits, try checkInByCode first
+    if (/^\d{8}$/.test(trimmed)) {
+      setLoading(true);
+      try {
+        const { data } = await api.post('/appointments/checkin-by-code', { code: trimmed });
+        toast.success(`Check-in successful! Token: ${data.appointment.tokenLabel}`);
+        setPreview(data.appointment);
+        setCheckedInQueueNumber(data.appointment.queueNumber);
+        
+        setTimeout(() => {
+          setCheckedInQueueNumber(null);
+          setScanning(true);
+        }, 3000);
+        return;
+      } catch (error) {
+        toast.error(error.response?.data?.message || 'Invalid check-in code');
+        setScanning(true);
+        return;
+      } finally {
+        setLoading(false);
+      }
+    }
+    
+    // Otherwise treat as JWT token (existing logic)
+    await handleScan(trimmed);
   };
 
   const handleReject = () => {
@@ -160,13 +198,13 @@ export default function ScannerPage() {
 
             {/* Manual Token Entry */}
             <div className="rounded-xl bg-slate-800 p-4 shadow-lg">
-              <p className="mb-3 text-sm font-medium text-slate-300">Fallback: Paste token manually</p>
+              <p className="mb-3 text-sm font-medium text-slate-300">Fallback: Enter 8-digit code or paste token</p>
               <div className="flex gap-2">
                 <input
                   type="text"
                   value={manualToken}
                   onChange={(e) => setManualToken(e.target.value)}
-                  placeholder="Paste QR token here..."
+                  placeholder="Enter 8 digits (e.g., 12345678) or paste QR token..."
                   className="flex-1 rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-teal-500 focus:outline-none"
                   onKeyPress={(e) => e.key === 'Enter' && handleManualScan()}
                 />
@@ -175,9 +213,10 @@ export default function ScannerPage() {
                   disabled={!manualToken.trim() || loading}
                   className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
                 >
-                  Scan
+                  Check In
                 </button>
               </div>
+              <p className="mt-2 text-xs text-slate-400">Supports: 8-digit codes from email OR QR token JWT</p>
             </div>
 
             {/* Resume Scan Button */}

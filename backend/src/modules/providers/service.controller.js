@@ -102,32 +102,58 @@ const displayNameFromCode = code => code.toLowerCase().replace(/[_-]+/g, ' ')
 export const listServices = async (req, res, next) => {
   try {
     const [saved, legacy, providers, locations] = await Promise.all([
-      Service.find().populate('location', 'name code address').sort('name').lean(),
+      Service.find()
+        .populate('location', 'name code address providerId')
+        .populate('providerId', 'name code branch')
+        .sort('name')
+        .lean(),
       legacyServiceEntries(),
       Provider.find({ isActive: true }).select('name code services branch').sort('name').lean(),
-      Location.find({ isActive: true }).select('name code address').lean(),
+      Location.find({ isActive: true })
+        .populate('providerId', 'name code branch')
+        .select('name code address providerId')
+        .lean(),
     ]);
     const providersById = new Map(providers.map(provider => [String(provider._id), provider]));
     const locationsById = new Map(locations.map(loc => [String(loc._id), loc]));
     const providerForCode = code => providers.find(provider => provider.services?.some(service => String(service).toUpperCase() === code));
+    
     const savedWithLocation = saved.map(service => {
-      const provider = providersById.get(String(service.providerId)) || (!service.providerId && providerForCode(service.code));
-      const loc = locationsById.get(String(service.location)) || null;
+      const loc = (typeof service.location === 'object' ? service.location : null) || locationsById.get(String(service.location)) || null;
+      
+      // First priority: use the location's provider (this is the authoritative provider for the location)
+      let displayProvider = null;
+      if (loc && loc.providerId) {
+        displayProvider = (typeof loc.providerId === 'object' ? loc.providerId : providersById.get(String(loc.providerId))) || null;
+      }
+      
+      // Second priority: use the service's providerId
+      if (!displayProvider && service.providerId) {
+        displayProvider = (typeof service.providerId === 'object' ? service.providerId : providersById.get(String(service.providerId))) || null;
+      }
+      
+      // Third priority: find provider by service code (legacy)
+      if (!displayProvider) {
+        displayProvider = providerForCode(service.code);
+      }
+      
       const mapped = {
         ...service,
-        providerId: provider?._id || '',
-        providerName: provider?.name || '',
-        providerCode: provider?.branch?.code || provider?.code || '',
-        locationName: loc?.name || '',
-        locationCode: loc?.code || '',
-        locationAddress: loc?.address || '',
+        providerId: displayProvider?._id || '',
+        providerName: displayProvider?.name || '',
+        providerCode: displayProvider?.branch?.code || displayProvider?.code || '',
+        locationName: (typeof loc === 'object' ? loc?.name : '') || '',
+        locationCode: (typeof loc === 'object' ? loc?.code : '') || '',
+        locationAddress: (typeof loc === 'object' ? loc?.address : '') || '',
       };
+      
       // Debug log for services with requirements
       if (service.requirements && service.requirements.length > 0) {
         console.log(`[listServices] Service ${service.code} has ${service.requirements.length} requirements:`, service.requirements);
       }
       return mapped;
     });
+    
     const savedCodes = new Set(saved.map(service => service.code));
     const legacyRows = [...legacy.values()]
       .filter(({ code }) => !savedCodes.has(code))
@@ -144,11 +170,13 @@ export const listServices = async (req, res, next) => {
         isActive: true,
         legacy: true,
       }));
+    
     const rolePermissions = req.user && req.user.role !== 'SUPER_ADMIN'
       ? await RolePermission.findOne({ role: req.user.role }).select('permissions').lean()
       : null;
     const canManage = req.user?.role === 'SUPER_ADMIN' ||
       (rolePermissions?.permissions ?? DEFAULT_ROLE_PERMISSIONS[req.user?.role] ?? []).includes('providers.manage');
+    
     const services = [...savedWithLocation, ...legacyRows]
       .filter(service => canManage || service.isActive);
     return res.json(services);

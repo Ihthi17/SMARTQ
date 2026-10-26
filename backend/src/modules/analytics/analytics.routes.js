@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import { protect, authorizePermission } from '../../middlewares/auth.middleware.js';
-import { getQueueAnalytics, getPeakHoursAnalytics, getStaffPerformanceAnalytics } from './analytics.controller.js';
+import { getQueueAnalytics, getPeakHoursAnalytics, getStaffPerformanceAnalytics, getDashboardSummary } from './analytics.controller.js';
 
 const router = Router();
 const viewAnalytics = [protect, authorizePermission('appointments.view')];
 
+router.get('/dashboard/summary', ...viewAnalytics, getDashboardSummary);
 router.get('/queue', ...viewAnalytics, getQueueAnalytics);
 router.get('/queue/peak-hours', ...viewAnalytics, getPeakHoursAnalytics);
 router.get('/queue/staff-performance', ...viewAnalytics, getStaffPerformanceAnalytics);

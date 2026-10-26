@@ -11,9 +11,12 @@ const appointmentSchema = new mongoose.Schema(
     customerName: { type: String, trim: true, maxlength: 150 },
     customerEmail: { type: String, trim: true, lowercase: true },
     customerPhone: { type: String, trim: true },
+    qrAccessToken: { type: String, trim: true, select: false }, // Secure token for QR page access
+    qrToken: { type: String, trim: true, select: false }, // Current 8-digit check-in code
     qrTokenHash: { type: String, select: false },
-    qrGeneratedAt: { type: Date }, // When QR was generated (on confirmation)
-    qrExpiresAt: { type: Date }, // QR expires 1 minute after generation
+    qrGeneratedAt: { type: Date }, // When current QR code was generated
+    qrExpiresAt: { type: Date }, // When current QR code expires (60 seconds after generation)
+    usedQrCodes: [{ type: String, select: false }], // Track used codes to prevent replay attacks
     queueDate: { type: Date, required: true, index: true },
     scheduledStart: { type: Date, required: true },
     // False for walk-in / flexible services where the customer did not pick a date/time.

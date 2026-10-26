@@ -328,13 +328,14 @@ export const updateAppointment = async (req, res, next) => {
 
 const performCheckIn = async (req, res, staffOverride = false) => {
     if (!validateObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid appointment id.' });
-    const appointment = await Appointment.findById(req.params.id).select('+qrTokenHash');
+    const appointment = await Appointment.findById(req.params.id).select('+qrTokenHash').populate('location', 'coordinates branchCode');
     if (!appointment || (!staffOverride && !validateQrToken(req.body?.token, appointment.qrTokenHash))) {
       return res.status(404).json({ message: 'Invalid appointment QR code.' });
     }
-    const provider = await Provider.findById(appointment.providerId).select('maxQueueSize branch');
     if (!staffOverride && (await Setting.get('queue_require_location_checkin', true)) === true) {
-      const locationCoordinates = provider?.branch?.coordinates;
+      // Use appointment's location coordinates, not provider's branch
+      const locationCoordinates = appointment.location?.coordinates || 
+                                  (await Provider.findById(appointment.providerId).select('branch')).branch?.coordinates;
       if (!Number.isFinite(locationCoordinates?.latitude) || !Number.isFinite(locationCoordinates?.longitude)) {
         return res.status(409).json({ message: 'This location has not set its check-in coordinates. Please ask staff to check you in.' });
       }
@@ -346,6 +347,7 @@ const performCheckIn = async (req, res, staffOverride = false) => {
         String(req.body.branchCode).toUpperCase() !== appointment.branchCode) {
       return res.status(403).json({ message: 'Check in at the location assigned to this appointment.' });
     }
+    const provider = await Provider.findById(appointment.providerId).select('maxQueueSize');
     const queueLimit = Number(await Setting.get('queue_max_size', provider?.maxQueueSize || 50));
     const activeCount = await Appointment.countDocuments({
       providerId: appointment.providerId,
@@ -772,7 +774,7 @@ import { getNextQueueNumber } from './counter.service.js';
 import jwt from 'jsonwebtoken';
 
 const QR_SECRET = process.env.QR_SECRET || 'your-qr-secret-change-in-production';
-const QR_TOKEN_LIFETIME = 60; // 60 seconds
+const QR_TOKEN_LIFETIME = 60; // 60 seconds (QR code valid for 1 minute)
 const CHECKIN_OPEN_MINUTES = Number(process.env.CHECKIN_OPEN_MINUTES_BEFORE) || 30;
 const CHECKIN_EXPIRE_MINUTES = Number(process.env.CHECKIN_EXPIRE_MINUTES_AFTER) || 15;
 
@@ -903,9 +905,251 @@ export const getQrToken = async (req, res, next) => {
 };
 
 /**
- * POST /api/appointments/:id/refresh-qr
- * Customer requests new QR code when previous one expires
- * Only works if QR has actually expired (1 minute window)
+ * GET /api/appointments/:id/qr-image/:token
+ * Generate QR code image dynamically (for embedding in email)
+ * Auto-refreshes code every 60 seconds based on time
+ */
+export const getQrImage = async (req, res, next) => {
+  try {
+    const { id, token } = req.params;
+
+    if (!validateObjectId(id)) {
+      return res.status(400).json({ message: 'Invalid appointment id.' });
+    }
+
+    const appointment = await Appointment.findById(id).select('+qrAccessToken +qrToken +qrGeneratedAt +qrExpiresAt').lean();
+
+    if (!appointment) {
+      return res.status(404).json({ message: 'Appointment not found.' });
+    }
+
+    // Validate access token
+    if (appointment.qrAccessToken !== token) {
+      return res.status(403).json({ message: 'Invalid access token.' });
+    }
+
+    // Check appointment is confirmed
+    if (appointment.status !== 'confirmed') {
+      return res.status(409).json({ message: 'Appointment is not confirmed yet.' });
+    }
+
+    const now = new Date();
+    let currentCode = appointment.qrToken;
+    let codeExpiresAt = appointment.qrExpiresAt;
+
+    // If current code has expired, generate a new one
+    if (codeExpiresAt < now) {
+      const newCode = Math.floor(10000000 + Math.random() * 90000000).toString();
+      const newExpiryTime = new Date(now.getTime() + 60 * 1000);
+      
+      await Appointment.updateOne(
+        { _id: id },
+        {
+          qrToken: newCode,
+          qrGeneratedAt: now,
+          qrExpiresAt: newExpiryTime,
+          $push: { usedQrCodes: appointment.qrToken }, // Track old code as used
+        }
+      );
+
+      currentCode = newCode;
+      codeExpiresAt = newExpiryTime;
+    }
+
+    // Generate QR code image as PNG
+    const qrImage = await QRCode.toBuffer(currentCode, {
+      errorCorrectionLevel: 'M',
+      margin: 2,
+      width: 320,
+    });
+
+    // Set cache headers to prevent caching (so it regenerates every access)
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+    res.set('Content-Type', 'image/png');
+    
+    return res.send(qrImage);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/appointments/:id/qr/:token
+ * Get current QR code with countdown and auto-refresh support
+ * Token is the secure access token sent in the email
+ */
+export const getQrCode = async (req, res, next) => {
+  try {
+    const { id, token } = req.params;
+
+    if (!validateObjectId(id)) {
+      return res.status(400).json({ message: 'Invalid appointment id.' });
+    }
+
+    const appointment = await Appointment.findById(id).select('+qrAccessToken +qrToken +qrGeneratedAt +qrExpiresAt').lean();
+
+    if (!appointment) {
+      return res.status(404).json({ message: 'Appointment not found.' });
+    }
+
+    // Validate access token
+    if (appointment.qrAccessToken !== token) {
+      return res.status(403).json({ message: 'Invalid access token.' });
+    }
+
+    // Check appointment is confirmed
+    if (appointment.status !== 'confirmed') {
+      return res.status(409).json({ message: 'Appointment is not confirmed yet.' });
+    }
+
+    const now = new Date();
+    
+    // If current code has expired, generate a new one
+    if (appointment.qrExpiresAt < now) {
+      const newCode = Math.floor(10000000 + Math.random() * 90000000).toString();
+      const newExpiryTime = new Date(now.getTime() + 60 * 1000);
+      
+      await Appointment.updateOne(
+        { _id: id },
+        {
+          qrToken: newCode,
+          qrGeneratedAt: now,
+          qrExpiresAt: newExpiryTime,
+          $push: { usedQrCodes: appointment.qrToken }, // Track old code as used
+        }
+      );
+
+      appointment.qrToken = newCode;
+      appointment.qrGeneratedAt = now;
+      appointment.qrExpiresAt = newExpiryTime;
+    }
+
+    // Generate QR image from 8-digit code
+    const qrImage = await QRCode.toDataURL(appointment.qrToken, { 
+      errorCorrectionLevel: 'M', 
+      margin: 2, 
+      width: 320 
+    });
+
+    // Calculate countdown seconds
+    const secondsRemaining = Math.max(0, Math.ceil((appointment.qrExpiresAt - now) / 1000));
+
+    return res.json({
+      appointmentId: id,
+      code: appointment.qrToken,
+      qrImage: qrImage, // Base64 QR image
+      expiresAt: appointment.qrExpiresAt.toISOString(),
+      secondsRemaining: secondsRemaining,
+      tokenLabel: appointment.tokenLabel,
+      customerName: appointment.customerName,
+      service: appointment.serviceCode,
+      location: appointment.branchCode,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/appointments/checkin-by-code
+ * Check-in using manually entered 8-digit code or scanned code
+ * Called from Queue Control when staff enters/scans code
+ */
+export const checkInByCode = async (req, res, next) => {
+  try {
+    const { code, branchCode } = req.body || {};
+
+    if (!code || typeof code !== 'string') {
+      return res.status(400).json({ message: 'Check-in code is required.' });
+    }
+
+    const now = new Date();
+
+    // Find appointment with this code that hasn't expired
+    const appointment = await Appointment.findOne({
+      qrToken: code.trim(),
+      qrExpiresAt: { $gt: now }, // Code must not be expired
+      status: 'confirmed', // Must be confirmed
+    })
+      .select('+qrToken +usedQrCodes');
+
+    if (!appointment) {
+      return res.status(401).json({ 
+        message: 'Invalid or expired check-in code. Please ask customer to open the QR code link again.' 
+      });
+    }
+
+    // Check if code was already used (prevent replay attacks)
+    if (appointment.usedQrCodes?.includes(code.trim())) {
+      return res.status(409).json({ 
+        message: 'This check-in code has already been used. Please request a new one.' 
+      });
+    }
+
+    // Check if already checked in
+    if (appointment.status !== 'confirmed') {
+      return res.status(409).json({ 
+        message: `Appointment has already been checked in or is no longer available (status: ${appointment.status}).` 
+      });
+    }
+
+    // Validate check-in window
+    if (now < appointment.checkInOpensAt || now > appointment.checkInExpiresAt) {
+      return res.status(409).json({ 
+        message: 'Check-in window is not open for this appointment.' 
+      });
+    }
+
+    // Update appointment to queued and mark code as used
+    const result = await Appointment.findByIdAndUpdate(
+      appointment._id,
+      {
+        status: 'queued',
+        checkedInAt: now,
+        checkInMethod: 'qr_admin',
+        $push: { usedQrCodes: code.trim() }, // Add this code to used codes
+      },
+      { new: true }
+    )
+      .populate('providerId', 'name')
+      .populate('userId', 'name phone');
+
+    // Notify queue system
+    await notifyQueueChanged(req, {
+      providerId: result.providerId,
+      branchCode: result.branchCode,
+      serviceCode: result.serviceCode,
+      queueDate: result.queueDate,
+    });
+
+    // Log audit
+    await writeAuditLog(req, {
+      action: 'appointment.checked_in_by_code',
+      resource: 'appointment',
+      resourceId: result._id,
+      details: { tokenLabel: result.tokenLabel, method: 'qr_code' },
+    });
+
+    return res.json({
+      success: true,
+      message: 'Check-in successful!',
+      appointment: {
+        tokenLabel: result.tokenLabel,
+        customerName: result.customerName,
+        service: result.serviceCode,
+        location: result.branchCode,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/appointments/:id/qr/:token
+ * Customer requests new QR code (validates access token)
  */
 export const refreshQrToken = async (req, res, next) => {
   try {
@@ -931,6 +1175,7 @@ export const refreshQrToken = async (req, res, next) => {
       message: 'QR code refreshed successfully',
       token: qrToken,
       expiresAt: qrExpiresAt,
+      checkInCode: checkInCode,
       expiresIn: '60s'
     });
   } catch (error) {
@@ -995,6 +1240,60 @@ export const scanQrToken = async (req, res, next) => {
       location: appointment.location,
       startTime: appointment.startTime,
       status: appointment.status,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/appointments/validate-checkin-code
+ * Validates 8-digit check-in code from email QR
+ * Returns appointment preview if code is valid and not expired
+ */
+export const validateCheckInCode = async (req, res, next) => {
+  try {
+    const { code } = req.body || {};
+
+    if (!code || typeof code !== 'string') {
+      return res.status(400).json({ message: 'Check-in code is required.' });
+    }
+
+    // Find appointment with matching QR token that hasn't expired
+    const now = new Date();
+    const appointment = await Appointment.findOne({
+      qrToken: code.trim(),
+      qrExpiresAt: { $gt: now }, // QR not expired
+    })
+      .populate('userId', 'name phone photo')
+      .select('+qrToken');
+
+    if (!appointment) {
+      return res.status(401).json({ message: 'Invalid or expired check-in code.' });
+    }
+
+    // Validate appointment state for check-in
+    if (appointment.status !== 'confirmed') {
+      return res.status(409).json({ message: `Cannot check in: appointment status is ${appointment.status}. Must be confirmed.` });
+    }
+
+    if (now > appointment.checkInExpiresAt) {
+      return res.status(409).json({ message: 'Check-in window has expired.' });
+    }
+
+    // Return preview (no state change)
+    const phoneLastFour = appointment.customerPhone?.slice(-4) || '****';
+    return res.json({
+      appointmentId: appointment._id,
+      checkInCode: appointment.qrToken,
+      customerName: appointment.customerName,
+      phoneLastFour,
+      photoUrl: appointment.userId?.photo || null,
+      service: appointment.serviceCode,
+      location: appointment.location,
+      startTime: appointment.startTime,
+      status: appointment.status,
+      tokenLabel: appointment.tokenLabel,
     });
   } catch (error) {
     next(error);

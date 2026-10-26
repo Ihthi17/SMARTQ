@@ -152,8 +152,15 @@ export default function QueueControl() {
 
   const handleQRScan = async (qrToken) => {
     try {
-      const { data } = await api.post(`/appointments/scan`, { token: qrToken, branchCode, serviceCode });
-      toast.success('Customer checked in successfully');
+      // If it's an 8-digit code, use the 8-digit endpoint
+      if (/^\d{8}$/.test(qrToken.trim())) {
+        const { data } = await api.post('/appointments/checkin-by-code', { code: qrToken.trim() });
+        toast.success('Customer checked in successfully');
+      } else {
+        // Otherwise try JWT token endpoint
+        const { data } = await api.post(`/appointments/scan`, { token: qrToken, branchCode, serviceCode });
+        toast.success('Customer checked in successfully');
+      }
       setScanQRMode(false);
       setQrInput('');
       await loadQueue();
@@ -407,7 +414,7 @@ export default function QueueControl() {
               {queue.current ? (
                 <>
                   <p className="mt-3 text-3xl font-bold text-teal-900">{queue.current.tokenLabel}</p>
-                  <p className="mt-2 text-sm text-teal-700">Patient: {queue.current.customerName || 'Customer'} (Counter 1)</p>
+                  <p className="mt-2 text-sm text-teal-700">Name: {queue.current.customerName || 'Customer'} (Counter 1)</p>
                   {queueStats.serviceElapsed > 0 && (
                     <p className="mt-2 text-xs text-teal-600">⏱️ Service: {formatTime(queueStats.serviceElapsed)}</p>
                   )}

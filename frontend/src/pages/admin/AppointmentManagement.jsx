@@ -1,5 +1,4 @@
 import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { AdminLayout } from '../../layouts/AdminLayout';
 import { AuthContext } from '../../context/AuthContext';
 import api from '../../api/axiosInstance';
@@ -95,9 +94,23 @@ export default function AppointmentManagement() {
 
   useEffect(() => {
     api.get('/services')
-      .then(({ data }) => setServiceCatalog(requireArrayResponse(data, 'services')))
+      .then(({ data }) => {
+        const services = requireArrayResponse(data, 'services');
+        // Ensure all services have providerId set
+        const enrichedServices = services.map(service => {
+          if (!service.providerId && service.providerCode) {
+            // Try to find provider by code if providerId is missing
+            const matchedProvider = providers.find(p => p.code === service.providerCode || p.branch?.code === service.providerCode);
+            if (matchedProvider) {
+              service.providerId = matchedProvider._id;
+            }
+          }
+          return service;
+        });
+        setServiceCatalog(enrichedServices);
+      })
       .catch(error => toast.error(error.response?.data?.message || error.message || 'Could not load services'));
-  }, []);
+  }, [providers]);
 
   useEffect(() => {
     api.get('/appointments/staff')
@@ -264,7 +277,8 @@ export default function AppointmentManagement() {
   };
 
   const selectedService = serviceCatalog.find(service => service.code === form.serviceCode);
-  const selectedProvider = providers.find(provider => provider._id === String(selectedService?.providerId));
+  const selectedProviderId = typeof selectedService?.providerId === 'object' ? selectedService?.providerId?._id : selectedService?.providerId;
+  const selectedProvider = providers.find(provider => provider._id === String(selectedProviderId)) || (typeof selectedService?.providerId === 'object' ? selectedService.providerId : null);
   const requirements = selectedService?.requirements || [];
   const detailRequirements = serviceCatalog.find(service => service.code === details?.serviceCode)?.requirements || [];
   const downloadRequirementFile = async (appointment, fieldName, file) => {
@@ -319,8 +333,8 @@ export default function AppointmentManagement() {
         }
         const payload = {
           ...form,
-          providerId: selectedService?.providerId,
-          branchCode: selectedProvider?.branch?.code || selectedProvider?.code || selectedService?.providerCode,
+          providerId: selectedService?.providerId || (typeof selectedService?.providerId === 'object' ? selectedService.providerId._id : selectedService?.providerId),
+          branchCode: selectedProvider?.branch?.code || selectedProvider?.code || selectedService?.providerCode || '',
         };
         // Respect the service's date/time requirement: send a timestamp only when the
         // service requires it. Walk-in / flexible services send null (server uses now()).
@@ -379,7 +393,6 @@ export default function AppointmentManagement() {
           </div>
           <div className="flex gap-2">
             <button onClick={refresh} disabled={busy} className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"><RefreshCw size={15} /> Refresh</button>
-            <Link to="/book-appointment" className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">Calendar</Link>
             {canManage && <button onClick={openCreate} className="rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white">+ Create appointment</button>}
           </div>
         </header>

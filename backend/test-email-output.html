@@ -1,0 +1,113 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f8f9fa; margin: 0; padding: 0; }
+    .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; }
+    .header { background: linear-gradient(135deg, #0f766e 0%, #14b8a6 100%); padding: 40px 30px; text-align: center; color: white; }
+    .header h1 { margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.5px; }
+    .header p { margin: 8px 0 0 0; font-size: 14px; opacity: 0.9; }
+    .content { padding: 40px 30px; }
+    .qr-section { text-align: center; margin: 32px 0; padding: 24px 0; border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; }
+    .qr-label { font-size: 12px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 1px; margin: 0 0 16px 0; }
+    .qr-image { text-align: center; margin: 20px 0; }
+    .qr-image img { display: block; border: 2px solid #e5e7eb; border-radius: 12px; padding: 8px; margin: 0 auto; }
+    .details-box { background-color: #f3f4f6; padding: 24px; border-radius: 8px; margin: 24px 0; }
+    .details-row { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #d1d5db; font-size: 14px; }
+    .details-row:last-child { border-bottom: none; }
+    .details-label { color: #6b7280; font-weight: 500; }
+    .details-value { color: #111827; font-weight: 600; }
+    .instructions { background-color: #f0f9f8; border-left: 4px solid #14b8a6; padding: 20px; border-radius: 6px; margin: 24px 0; }
+    .instructions h3 { margin: 0 0 12px 0; color: #0f766e; font-size: 16px; font-weight: 700; }
+    .instructions ol { margin: 0; padding-left: 20px; }
+    .instructions li { margin: 8px 0; color: #374151; font-size: 14px; line-height: 1.6; }
+    .footer { background-color: #f3f4f6; padding: 24px 30px; text-align: center; font-size: 12px; color: #6b7280; border-top: 1px solid #e5e7eb; }
+    .footer p { margin: 8px 0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <h1>✓ Appointment Confirmed</h1>
+      <p>Your queue token is ready</p>
+    </div>
+
+    <!-- Main Content -->
+    <div class="content">
+      <p style="font-size: 16px; color: #111827; margin: 0 0 24px 0;">
+        Hello <strong>Mohamed Ihthisham</strong>,
+      </p>
+
+      <p style="font-size: 14px; color: #374151; line-height: 1.8; margin: 0 0 24px 0;">
+        Your appointment at <strong>61300-3</strong> has been confirmed. Your queue token is ready for check-in.
+      </p>
+
+      <!-- QR Code Section -->
+      <div class="qr-section">
+        <p class="qr-label">Your Check-in QR Code</p>
+        <p style="font-size: 14px; color: #111827; margin: 16px 0;">
+          Scan this QR code at the check-in counter. Code expires in 60 seconds.
+        </p>
+        <div class="qr-image">
+          <img alt="Appointment check-in QR code" src="data:image/png;base64,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" width="280" height="280" />
+        </div>
+        <p style="font-size: 12px; color: #6b7280; margin: 12px 0 0 0; text-align: center;">
+          <strong>Your 8-digit check-in code auto-refreshes every 60 seconds</strong>
+        </p>
+      </div>
+
+      <!-- Appointment Details -->
+      <div class="details-box">
+        <div class="details-row">
+          <span class="details-label">📅 Service</span>
+          <span class="details-value">OPD-0001</span>
+        </div>
+        <div class="details-row">
+          <span class="details-label">📍 Location</span>
+          <span class="details-value">61300-3</span>
+        </div>
+        <div class="details-row">
+          <span class="details-label">🎫 Token Number</span>
+          <span class="details-value">Q-001</span>
+        </div>
+        
+        <div class="details-row">
+          <span class="details-label">📋 Appointment Type</span>
+          <span class="details-value">Walk-in / Flexible</span>
+        </div>
+        
+      </div>
+
+      <!-- Instructions -->
+      <div class="instructions">
+        <h3>📋 How to Check In</h3>
+        <ol>
+          <li>Arrive at the location at your scheduled time</li>
+          <li>Show this email with the QR code at the check-in counter</li>
+          <li>Staff will scan your QR code or you can provide the 8-digit code</li>
+          <li>Your position will be confirmed in the queue</li>
+          <li>Wait for your token number to be called</li>
+        </ol>
+      </div>
+
+      <!-- Important Notice -->
+      <p style="font-size: 13px; color: #6b7280; line-height: 1.8; margin: 24px 0;">
+        <strong>ℹ️ Important:</strong> Your QR code contains an 8-digit check-in code that is valid for 60 seconds. After 60 seconds, a new code is generated. Open this email on your device for the current code at check-in.
+      </p>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <p style="margin: 0; font-weight: 600; color: #111827;">Smart Queue</p>
+      <p style="margin: 4px 0 0 0;">Professional Queue Management System</p>
+      <p style="margin: 12px 0 0 0; border-top: 1px solid #d1d5db; padding-top: 12px;">
+        This is an automated message. Please do not reply to this email.
+      </p>
+    </div>
+  </div>
+</body>
+</html>

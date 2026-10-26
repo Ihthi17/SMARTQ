@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import QRCode from 'qrcode';
 import { Appointment } from './appointment.model.js';
 import { Provider } from '../providers/provider.model.js';
+import { Location } from '../locations/location.model.js';
 import { Service as ServiceCatalog } from '../providers/service.model.js';
 import { User } from '../users/user.model.js';
 import { QueueSession } from '../queue/queueSession.model.js';
@@ -30,12 +31,23 @@ const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (character) => (
 
 const allocateToken = async ({ providerId, queueDate, branchCode, averageServiceMinutes, queueStatus }) => {
   const scope = { providerId, queueDate };
+  
+  // Use atomic findOneAndUpdate to get the next token number
+  // This prevents race conditions where multiple concurrent confirmations get the same token
   try {
-    // Get the current queue session
-    let session = await QueueSession.findOne(scope);
-    
+    let session = await QueueSession.findOneAndUpdate(
+      scope,
+      { 
+        $inc: { queueLength: 1 },
+        $set: { branchCode, averageServiceMinutes, status: queueStatus }
+      },
+      { new: true, upsert: true }
+    );
+
+    // If this is the first update (queueLength was just incremented from 0 to 1)
+    // we need to check if it's actually the first appointment
     if (!session) {
-      // Create new session if it doesn't exist
+      // Fallback: create new session
       session = await QueueSession.create({
         ...scope,
         branchCode,
@@ -45,45 +57,18 @@ const allocateToken = async ({ providerId, queueDate, branchCode, averageService
       });
       return { session, tokenNumber: 1 };
     }
-    
-    // Instead of just incrementing, count actual confirmed/queued appointments to get accurate token number
-    const confirmedCount = await Appointment.countDocuments({
-      providerId,
-      queueDate: session.queueDate,
-      status: { $in: ['confirmed', 'queued', 'called', 'in_service', 'completed'] },
-      tokenNumber: { $gt: 0 },
-    });
-    
-    // Next token number is the count + 1
-    const nextTokenNumber = confirmedCount + 1;
-    
-    // Update session with accurate queue length
-    session.queueLength = nextTokenNumber;
-    session.branchCode = branchCode;
-    session.averageServiceMinutes = averageServiceMinutes;
-    await session.save();
-    
-    return { session, tokenNumber: nextTokenNumber };
+
+    // The atomic increment guarantees each caller gets a unique queueLength
+    const tokenNumber = session.queueLength;
+    return { session, tokenNumber };
   } catch (error) {
-    if (error.code !== 11000) throw error;
-    // Duplicate key error - retry with correct count
-    const session = await QueueSession.findOne(scope);
-    if (!session) throw error;
-    
-    const confirmedCount = await Appointment.countDocuments({
-      providerId,
-      queueDate: session.queueDate,
-      status: { $in: ['confirmed', 'queued', 'called', 'in_service', 'completed'] },
-      tokenNumber: { $gt: 0 },
-    });
-    
-    const nextTokenNumber = confirmedCount + 1;
-    session.queueLength = nextTokenNumber;
-    session.branchCode = branchCode;
-    session.averageServiceMinutes = averageServiceMinutes;
-    await session.save();
-    
-    return { session, tokenNumber: nextTokenNumber };
+    // Even with atomic operations, handle other errors gracefully
+    if (error.code === 11000) {
+      // Duplicate key error on scope - shouldn't happen with findOneAndUpdate
+      console.error('Unexpected duplicate key error in allocateToken:', error);
+      throw error;
+    }
+    throw error;
   }
 };
 
@@ -140,8 +125,15 @@ export const createAppointment = async ({
   if (catalogService && !catalogService.channels.includes('appointments')) {
     throw Object.assign(new Error('Online appointments are not enabled for this service.'), { statusCode: 400 });
   }
-  if (catalogService?.providerId && String(catalogService.providerId) !== String(providerId)) {
-    throw Object.assign(new Error('Selected service is assigned to a different location.'), { statusCode: 400 });
+  // Validate that the service's location matches the provider's location
+  if (catalogService?.location) {
+    const serviceLocation = await Location.findById(catalogService.location).lean();
+    if (serviceLocation && String(serviceLocation.providerId) !== String(providerId)) {
+      throw Object.assign(
+        new Error(`Selected service "${catalogService.name}" is assigned to location "${serviceLocation?.name}" but you selected a different location.`),
+        { statusCode: 400 }
+      );
+    }
   }
   const service = normalizedServiceCode;
   const requirements = catalogService?.requirements?.length
@@ -493,37 +485,155 @@ export const generateQrAndNotify = async (appointment, userId) => {
   // Step 1: Allocate token number if not already allocated
   await ensureTokenAllocated(appointment);
   
-  // Step 2: Generate new QR token
-  const { token: qrToken, hash: qrTokenHash } = issueAppointmentQrToken();
+  // Step 2: Generate secure QR access token (for accessing the QR code page)
+  const qrAccessToken = crypto.randomBytes(32).toString('base64url');
+  appointment.qrAccessToken = qrAccessToken;
+  
+  // Step 3: Generate initial 8-digit check-in code (valid for 60 seconds)
+  const checkInCode = Math.floor(10000000 + Math.random() * 90000000).toString(); // 8-digit
   const now = new Date();
-  const qrExpiresAt = new Date(now.getTime() + 60 * 1000); // 1 minute expiry
+  const codeExpiresAt = new Date(now.getTime() + 60 * 1000); // 60 second expiry
   
   // Update appointment with QR info
-  appointment.qrTokenHash = qrTokenHash;
+  appointment.qrToken = checkInCode;
   appointment.qrGeneratedAt = now;
-  appointment.qrExpiresAt = qrExpiresAt;
+  appointment.qrExpiresAt = codeExpiresAt;
+  appointment.usedQrCodes = [];  // Initialize used codes tracking
   await appointment.save();
 
-  // Step 3: Send confirmation with Token + QR
+  // Step 4: Generate QR image as PNG buffer for attachment
+  let qrImageBuffer = null;
+  // Skip QR image generation since we're using live QR links in email instead
+  // This keeps the email lightweight and encourages users to use the live link
+
+  // Step 5: Send confirmation email with QR code as attachment
   const notificationDelivery = {};
-  const checkInOrigin = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
-  const checkInLink = `${checkInOrigin}/check-in?appointmentId=${appointment._id}&token=${encodeURIComponent(qrToken)}&branchCode=${encodeURIComponent(appointment.branchCode || '')}`;
-  const message = `Appointment ${appointment.tokenLabel} confirmed! Your token is ${appointment.tokenLabel}. Check in at ${appointment.branchCode}. QR code expires in 1 minute.`;
+  const message = `Appointment ${appointment.tokenLabel} confirmed! Your check-in code: ${checkInCode}. Valid for 60 seconds.`;
   
   if (appointment.customerEmail) {
     try {
-      const qrImage = await QRCode.toDataURL(checkInLink, { errorCorrectionLevel: 'M', margin: 2, width: 320 });
       const result = await sendEmail({
         to: appointment.customerEmail,
-        subject: 'Smart Queue — Appointment Confirmed - Your Queue Token',
-        html: `<p>Hello ${escapeHtml(appointment.customerName)},</p><p>Your appointment at ${escapeHtml(appointment.branchCode)} is confirmed!</p><p><strong style="font-size: 24px; color: #0f766e;">Your Token: ${escapeHtml(appointment.tokenLabel)}</strong></p><p>Scan this QR code to check in (expires in 1 minute):</p><img alt="Appointment check-in QR code" src="cid:appointment-checkin" width="240" height="240"><p>If needed, open <a href="${checkInLink}">your check-in link</a>.</p>`,
+        subject: 'Smart Queue — Appointment Confirmed',
+        html: `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f8f9fa; margin: 0; padding: 0; }
+    .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; }
+    .header { background: linear-gradient(135deg, #0f766e 0%, #14b8a6 100%); padding: 40px 30px; text-align: center; color: white; }
+    .header h1 { margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.5px; }
+    .header p { margin: 8px 0 0 0; font-size: 14px; opacity: 0.9; }
+    .content { padding: 40px 30px; }
+    .qr-section { text-align: center; margin: 32px 0; padding: 24px 0; border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; }
+    .qr-label { font-size: 12px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 1px; margin: 0 0 16px 0; }
+    .qr-image { text-align: center; margin: 20px 0; }
+    .qr-image img { display: block; border: 2px solid #e5e7eb; border-radius: 12px; padding: 8px; margin: 0 auto; max-width: 100%; height: auto; }
+    .code-display { background: #f3f4f6; padding: 24px; border-radius: 8px; margin: 24px 0; text-align: center; }
+    .code-label { font-size: 12px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 1px; margin: 0 0 12px 0; }
+    .code-value { font-size: 48px; font-weight: 800; color: #0f766e; margin: 12px 0; font-family: 'Monaco', 'Courier New', monospace; letter-spacing: 6px; }
+    .details-box { background-color: #f3f4f6; padding: 24px; border-radius: 8px; margin: 24px 0; }
+    .details-row { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #d1d5db; font-size: 14px; }
+    .details-row:last-child { border-bottom: none; }
+    .details-label { color: #6b7280; font-weight: 500; }
+    .details-value { color: #111827; font-weight: 600; }
+    .instructions { background-color: #f0f9f8; border-left: 4px solid #14b8a6; padding: 20px; border-radius: 6px; margin: 24px 0; }
+    .instructions h3 { margin: 0 0 12px 0; color: #0f766e; font-size: 16px; font-weight: 700; }
+    .instructions ol { margin: 0; padding-left: 20px; }
+    .instructions li { margin: 8px 0; color: #374151; font-size: 14px; line-height: 1.6; }
+    .footer { background-color: #f3f4f6; padding: 24px 30px; text-align: center; font-size: 12px; color: #6b7280; border-top: 1px solid #e5e7eb; }
+    .footer p { margin: 8px 0; }
+    .warning { background-color: #fef3c7; border-left: 4px solid #f59e0b; padding: 16px; border-radius: 4px; margin: 16px 0; }
+    .warning-title { font-weight: 700; color: #92400e; margin: 0 0 8px 0; }
+    .warning-text { color: #78350f; font-size: 13px; margin: 0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <h1>✓ Appointment Confirmed</h1>
+      <p>Your queue token is ready</p>
+    </div>
+
+    <!-- Main Content -->
+    <div class="content">
+      <p style="font-size: 16px; color: #111827; margin: 0 0 24px 0;">
+        Hello <strong>${escapeHtml(appointment.customerName)}</strong>,
+      </p>
+
+      <p style="font-size: 14px; color: #374151; line-height: 1.8; margin: 0 0 24px 0;">
+        Your appointment at <strong>${escapeHtml(appointment.branchCode)}</strong> has been confirmed. Click the link below to view your auto-refreshing live QR code for check-in.
+      </p>
+
+      <!-- Appointment Details -->
+      <div class="details-box">
+        <div class="details-row">
+          <span class="details-label">📅 Service</span>
+          <span class="details-value">${escapeHtml(appointment.serviceCode)}</span>
+        </div>
+        <div class="details-row">
+          <span class="details-label">📍 Location</span>
+          <span class="details-value">${escapeHtml(appointment.branchCode)}</span>
+        </div>
+        <div class="details-row">
+          <span class="details-label">🎫 Token Number</span>
+          <span class="details-value">${escapeHtml(appointment.tokenLabel)}</span>
+        </div>
+        ${appointment.hasScheduledTime ? `
+        <div class="details-row">
+          <span class="details-label">🕐 Scheduled Time</span>
+          <span class="details-value">${new Date(appointment.scheduledStart).toLocaleString()}</span>
+        </div>
+        ` : `
+        <div class="details-row">
+          <span class="details-label">📋 Appointment Type</span>
+          <span class="details-value">Walk-in / Flexible</span>
+        </div>
+        `}
+      </div>
+
+      <!-- Instructions -->
+      <div class="instructions">
+        <h3>📋 How to Check In</h3>
+        <ol>
+          <li>Arrive at the location at your scheduled time</li>
+          <li>Show this email with the QR code to the staff at the check-in counter</li>
+          <li>Staff will scan the QR code or ask you to enter the code</li>
+          <li>Your position will be confirmed in the queue</li>
+          <li>Wait for your token number to be called</li>
+        </ol>
+      </div>
+
+      <!-- Important Notice - Live QR Link -->
+      <div class="warning">
+        <p class="warning-title">⏱️ Open Your Live Check-in QR Code</p>
+        <p class="warning-text" style="margin: 0 0 12px 0;">Click the button below to open your live QR code. It will automatically refresh every 60 seconds for security.</p>
+        <p style="text-align: center; margin: 12px 0;">
+          <a href="${escapeHtml(process.env.CLIENT_ORIGIN || 'http://localhost:5173')}/qr/${escapeHtml(String(appointment._id))}/${escapeHtml(qrAccessToken)}" style="display: inline-block; background-color: #0f766e; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: 600; font-size: 14px;">
+            📱 Open Live QR Code
+          </a>
+        </p>
+        <p class="warning-text">1. Keep this page open on your phone<br/>2. Arrive at your appointment location<br/>3. Show the QR code to staff for instant check-in</p>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <p style="margin: 0; font-weight: 600; color: #111827;">Smart Queue</p>
+      <p style="margin: 4px 0 0 0;">Professional Queue Management System</p>
+      <p style="margin: 12px 0 0 0; border-top: 1px solid #d1d5db; padding-top: 12px;">
+        This is an automated message. Please do not reply to this email.
+      </p>
+    </div>
+  </div>
+</body>
+</html>
+`,
         text: message,
-        attachments: [{
-          filename: `appointment-${appointment.tokenLabel}-checkin.png`,
-          content: Buffer.from(qrImage.slice('data:image/png;base64,'.length), 'base64'),
-          contentType: 'image/png',
-          cid: 'appointment-checkin',
-        }],
       });
       notificationDelivery.email = result.mocked ? 'mocked' : 'sent';
     } catch (error) {
@@ -563,10 +673,10 @@ export const generateQrAndNotify = async (appointment, userId) => {
         userId,
         appointmentId: appointment._id,
         channel,
-        category: 'appointment_confirmed',
+        category: 'booking_confirmation',
         recipient: channel === 'email' ? appointment.customerEmail : appointment.customerPhone,
-        subject: channel === 'email' ? 'Appointment confirmed with token' : undefined,
-        message: `Appointment ${appointment.tokenLabel} confirmed. Token: ${appointment.tokenLabel}. QR expires in 1 minute.`,
+        subject: channel === 'email' ? 'Appointment confirmed' : undefined,
+        message: `Appointment ${appointment.tokenLabel} confirmed. Show this token at check-in.`,
         status,
         sentAt: ['sent', 'mocked'].includes(status) ? new Date() : undefined,
         errorMessage: status === 'failed' ? notificationDelivery[`${channel}Error`] : undefined,
@@ -576,7 +686,7 @@ export const generateQrAndNotify = async (appointment, userId) => {
     }
   }
 
-  return { qrToken, notificationDelivery };
+  return { checkInCode, notificationDelivery };
 };
 
 /**
@@ -609,17 +719,75 @@ export const refreshQrCode = async (appointmentId, resendNotification = false) =
   // Optionally resend QR to customer
   if (resendNotification && appointment.customerEmail) {
     try {
-      const checkInOrigin = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
-      const checkInLink = `${checkInOrigin}/check-in?appointmentId=${appointment._id}&token=${encodeURIComponent(qrToken)}&branchCode=${encodeURIComponent(appointment.branchCode || '')}`;
-      const qrImage = await QRCode.toDataURL(checkInLink, { errorCorrectionLevel: 'M', margin: 2, width: 320 });
+      const qrImage = await QRCode.toDataURL(appointment._id.toString(), { errorCorrectionLevel: 'M', margin: 2, width: 320 });
       
       await sendEmail({
         to: appointment.customerEmail,
-        subject: 'Smart Queue — New QR Code (Expired)',
-        html: `<p>Hello ${escapeHtml(appointment.customerName)},</p><p>Your previous QR code has expired. Here's your new QR code for check-in (expires in 1 minute):</p><img alt="Appointment check-in QR code" src="cid:appointment-checkin" width="240" height="240"><p>Your token: ${escapeHtml(appointment.tokenLabel)}</p>`,
-        text: `Your QR code has expired. New check-in link: ${checkInLink}. Token: ${appointment.tokenLabel}`,
+        subject: 'Smart Queue — QR Code Refreshed',
+        html: `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f8f9fa; margin: 0; padding: 0; }
+    .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; }
+    .header { background: linear-gradient(135deg, #0f766e 0%, #14b8a6 100%); padding: 40px 30px; text-align: center; color: white; }
+    .header h1 { margin: 0; font-size: 24px; font-weight: 700; }
+    .content { padding: 40px 30px; }
+    .token-box { background: linear-gradient(135deg, #f0f9f8 0%, #e0f2f1 100%); border-left: 4px solid #0f766e; padding: 24px; margin: 24px 0; border-radius: 8px; }
+    .token-label { font-size: 12px; font-weight: 700; color: #0f766e; text-transform: uppercase; letter-spacing: 1px; margin: 0; }
+    .token-value { font-size: 56px; font-weight: 800; color: #0f766e; margin: 12px 0 0 0; font-family: 'Monaco', 'Courier New', monospace; letter-spacing: 4px; }
+    .qr-section { text-align: center; margin: 32px 0; padding: 24px 0; border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; }
+    .qr-label { font-size: 12px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 1px; margin: 0 0 16px 0; }
+    .qr-image { display: inline-block; padding: 16px; background: white; border: 2px solid #e5e7eb; border-radius: 12px; }
+    .footer { background-color: #f3f4f6; padding: 24px 30px; text-align: center; font-size: 12px; color: #6b7280; border-top: 1px solid #e5e7eb; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>✓ QR Code Refreshed</h1>
+    </div>
+
+    <div class="content">
+      <p style="font-size: 14px; color: #374151; line-height: 1.8; margin: 0 0 24px 0;">
+        Hello ${escapeHtml(appointment.customerName)},
+      </p>
+
+      <p style="font-size: 14px; color: #374151; line-height: 1.8; margin: 0 0 24px 0;">
+        Your new check-in QR code has been generated. Please use this code for check-in at <strong>${escapeHtml(appointment.branchCode)}</strong>.
+      </p>
+
+      <div class="token-box">
+        <p class="token-label">Your Queue Token</p>
+        <p class="token-value">${escapeHtml(appointment.tokenLabel)}</p>
+      </div>
+
+      <div class="qr-section">
+        <p class="qr-label">Show this code at check-in</p>
+        <div class="qr-image">
+          <img alt="Appointment check-in QR code" src="cid:appointment-checkin" width="240" height="240" style="display: block;">
+        </div>
+      </div>
+
+      <p style="font-size: 13px; color: #6b7280; line-height: 1.8; margin: 24px 0;">
+        Simply present this email or show your token at the check-in counter and staff will scan your QR code.
+      </p>
+    </div>
+
+    <div class="footer">
+      <p style="margin: 0; font-weight: 600; color: #111827;">Smart Queue</p>
+      <p style="margin: 4px 0 0 0;">Professional Queue Management System</p>
+    </div>
+  </div>
+</body>
+</html>
+`,
+        text: `Your new QR code is ready. Your token: ${appointment.tokenLabel}. Show this at check-in.`,
         attachments: [{
-          filename: `appointment-${appointment.tokenLabel}-checkin-renewed.png`,
+          filename: `appointment-${appointment.tokenLabel}-checkin-refreshed.png`,
           content: Buffer.from(qrImage.slice('data:image/png;base64,'.length), 'base64'),
           contentType: 'image/png',
           cid: 'appointment-checkin',
