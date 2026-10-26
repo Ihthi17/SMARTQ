@@ -471,8 +471,8 @@ export default function AppointmentManagement() {
                         {appointment.status === 'booked' && <option value="check-in">Staff-assisted check-in</option>}
                         {/* New QR check-in statuses */}
                         {appointment.status === 'pending' && <option value="confirm-qr">Confirm appointment</option>}
-                        {appointment.status === 'confirmed' && <option value="checkin-qr">✓ Check-in via QR</option>}
-                        {appointment.status === 'confirmed' && <option value="manual-checkin-qr">✓ Manual check-in</option>}
+                        {appointment.status === 'confirmed' && <option value="checkin-qr">✓ Check-in </option>}
+                        {/* {appointment.status === 'confirmed' && <option value="manual-checkin-qr">✓ Manual check-in</option>} */}
                         {['booked', 'pending', 'confirmed'].includes(appointment.status) && <option value="reject">Reject appointment</option>}
                         {/* Priority and cancel options */}
                         {['booked', 'queued', 'pending', 'confirmed', 'checked_in'].includes(appointment.status) && <option value="priority">{appointment.priority === 'emergency' ? 'Remove emergency priority' : 'Mark emergency priority'}</option>}

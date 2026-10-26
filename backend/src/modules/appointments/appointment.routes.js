@@ -4,7 +4,7 @@ import {
   listProviders, listStaff, create, listMine, listAll, checkIn, getStatus, setPriority, cancel, updateAppointment,
   staffCheckIn, sendAppointmentAlert, deleteAppointment, sendNotification, getNotificationHistory, reject,
   confirmAppointment, getQrImage, getQrCode, refreshQrToken, scanQrToken, validateCheckInCode, checkInByCode, checkInAppointment, manualCheckIn,
-  downloadRequirementFile,
+  downloadRequirementFile, updateTokenColor,
 } from './appointment.controller.js';
 import {
   createRecurringSeries, getRecurringSeries, pauseRecurringSeries, resumeRecurringSeries, cancelRecurringSeries,
@@ -45,6 +45,7 @@ router.post('/:id/reject', ...manageAppointments, reject);
 
 // QR Check-in endpoints (Part 3)
 router.patch('/:id/confirm', ...manageAppointments, confirmRateLimiter, confirmAppointment);
+router.patch('/:id/token-color', ...manageAppointments, updateTokenColor);  // Update token display color
 router.get('/:id/qr-image/:token', getQrImage);  // Get dynamic QR image (public, token-protected)
 router.get('/:id/qr/:token', getQrCode);         // Get dynamic QR code with countdown (public, token-protected)
 router.post('/:id/refresh-qr', protect, qrTokenRateLimiter, refreshQrToken);

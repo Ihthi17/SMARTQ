@@ -1464,3 +1464,48 @@ export const manualCheckIn = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * PATCH /api/appointments/:id/token-color
+ * Update token display color
+ * Only staff/admin can update token color
+ */
+export const updateTokenColor = async (req, res, next) => {
+  try {
+    if (!validateObjectId(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid appointment id.' });
+    }
+
+    const { color } = req.body || {};
+
+    if (!color || typeof color !== 'string' || !/^#[0-9A-Fa-f]{6}$/.test(color.trim())) {
+      return res.status(400).json({ message: 'Invalid color. Must be hex format (e.g., #0f766e).' });
+    }
+
+    const appointment = await Appointment.findById(req.params.id);
+    if (!appointment) {
+      return res.status(404).json({ message: 'Appointment not found.' });
+    }
+
+    if (!appointment.tokenNumber) {
+      return res.status(409).json({ message: 'Cannot set color for unconfirmed appointment.' });
+    }
+
+    appointment.tokenColor = color.trim();
+    await appointment.save();
+
+    await writeAuditLog(req, {
+      action: 'appointment.token_color_updated',
+      resource: 'appointment',
+      resourceId: appointment._id,
+      details: { tokenLabel: appointment.tokenLabel, color: appointment.tokenColor },
+    });
+
+    return res.json({
+      message: 'Token color updated',
+      appointment: publicAppointment(appointment),
+    });
+  } catch (error) {
+    next(error);
+  }
+};

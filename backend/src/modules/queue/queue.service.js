@@ -65,19 +65,23 @@ export const getQueueSnapshot = async ({ providerId, branchCode, serviceCode, qu
     sortOrder = { tokenNumber: 1, createdAt: 1 };
   }
   
-  const [session, current, waiting, confirmedAppointments, total, showCustomerNames, callingMethod] = await Promise.all([
+  const [session, current, waiting, confirmedAppointments, confirmed, total, showCustomerNames, callingMethod] = await Promise.all([
     QueueSession.findOne({ providerId, queueDate: scope.queueDate }).lean(),
     Appointment.findOne({ ...scope, status: { $in: ['called', 'in_service'] } })
-      .sort('-calledAt').select('tokenNumber tokenLabel serviceCode customerName status priority calledAt estimatedWaitMinutes assignedCounterNumber').lean(),
+      .sort('-calledAt').select('tokenNumber tokenLabel serviceCode customerName status priority calledAt estimatedWaitMinutes assignedCounterNumber tokenColor').lean(),
     // Waiting list shows ONLY checked-in customers (status 'queued'). 
     // Confirmed appointments are not in queue yet - they appear only AFTER customer 
     // scans QR code or staff manually checks them in.
     Appointment.find({ ...scope, status: 'queued', tokenNumber: { $gt: 0 } })
       .sort(sortOrder)
-      .select('tokenNumber tokenLabel serviceCode customerName status priority createdAt estimatedWaitMinutes assignedCounterNumber').lean(),
+      .select('tokenNumber tokenLabel serviceCode customerName status priority createdAt estimatedWaitMinutes assignedCounterNumber tokenColor').lean(),
     // Count confirmed appointments (not yet checked-in)
     // Note: tokenNumber should be set on confirmation, but we count all confirmed just in case
     Appointment.countDocuments({ ...scope, status: 'confirmed' }),
+    // Get all confirmed appointments (not yet checked-in)
+    Appointment.find({ ...scope, status: 'confirmed', tokenNumber: { $gt: 0 } })
+      .sort(sortOrder)
+      .select('tokenNumber tokenLabel serviceCode customerName status priority createdAt estimatedWaitMinutes assignedCounterNumber tokenColor _id').lean(),
     Appointment.countDocuments({ ...scope, status: { $nin: ['cancelled', 'no_show'] } }),
     Setting.get('queue_show_customer_names', false),
     Setting.get('queue_calling_method', 'all_counters'),
@@ -85,6 +89,7 @@ export const getQueueSnapshot = async ({ providerId, branchCode, serviceCode, qu
   if (!showCustomerNames) {
     if (current) delete current.customerName;
     waiting.forEach((entry) => { delete entry.customerName; });
+    confirmed.forEach((entry) => { delete entry.customerName; });
   }
   return {
     providerId,
@@ -95,6 +100,7 @@ export const getQueueSnapshot = async ({ providerId, branchCode, serviceCode, qu
     next: waiting[0] || null,
     nextNext: waiting[1] || null,
     waiting,
+    confirmed,
     total,
     waitingCount: waiting.length,
     confirmedCount: confirmedAppointments,

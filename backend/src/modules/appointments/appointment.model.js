@@ -28,6 +28,7 @@ const appointmentSchema = new mongoose.Schema(
     checkInExpiresAt: { type: Date }, // startTime + 15 min (configurable)
     tokenNumber: { type: Number, min: 1, default: null, sparse: true }, // null until admin confirms
     tokenLabel: { type: String, trim: true, default: null, sparse: true }, // null until admin confirms
+    tokenColor: { type: String, trim: true, default: '#0f766e', match: /^#[0-9A-Fa-f]{6}$/ }, // Hex color for token display
     bookingType: { type: String, enum: ['in_person', 'virtual'], default: 'in_person' },
     createdVia: { type: String, enum: ['online', 'admin'], default: 'online' },
     priority: { type: String, enum: ['normal', 'high', 'emergency'], default: 'normal' },

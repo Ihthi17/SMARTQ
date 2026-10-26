@@ -3,12 +3,13 @@ import { AdminLayout } from '../../layouts/AdminLayout';
 import { useQueueSocket } from '../../hooks/useQueueSocket';
 import api from '../../api/axiosInstance';
 import toast, { Toaster } from 'react-hot-toast';
-import { Check, CirclePause, CirclePlay, ListOrdered, SkipForward, Siren, X, QrCode, Clock, RefreshCw } from 'lucide-react';
+import { Check, CirclePause, CirclePlay, ListOrdered, SkipForward, Siren, X, QrCode, Clock, RefreshCw, Palette } from 'lucide-react';
 import { AuthContext } from '../../context/AuthContext';
 import { servicesForChannel } from '../../utils/serviceCatalog';
 import NotificationCenter from '../../components/notifications/NotificationCenter';
 import { WaitingCustomersList } from '../../components/queue/WaitingCustomersList';
 import { QueueColorPicker } from '../../components/queue/QueueColorPicker';
+import { TokenColorPickerModal } from '../../components/queue/TokenColorPickerModal';
 import { EnhancedQueueDisplay } from '../../components/queue/EnhancedQueueDisplay';
 
 export default function QueueControl() {
@@ -24,6 +25,8 @@ export default function QueueControl() {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showPriorityColorPicker, setShowPriorityColorPicker] = useState(false);
   const [colorPickerBusy, setColorPickerBusy] = useState(false);
+  const [showColorPickerModal, setShowColorPickerModal] = useState(false);
+  const [selectedAppointmentForColor, setSelectedAppointmentForColor] = useState(null);
   const [busy, setBusy] = useState('');
   const [queueStats, setQueueStats] = useState({ startTime: null, currentStartTime: null, elapsed: 0, serviceElapsed: 0 });
   const [scanQRMode, setScanQRMode] = useState(false);
@@ -222,6 +225,16 @@ export default function QueueControl() {
     } catch (error) {
       console.error('Priority change error:', error);
       toast.error(error.response?.data?.message || 'Could not update priority');
+    }
+  };
+
+  const changeTokenColor = async (appointmentId, color) => {
+    try {
+      await api.patch(`/appointments/${appointmentId}/token-color`, { color });
+      toast.success('Token color updated');
+      await loadQueue();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Could not update token color');
     }
   };
 
@@ -453,6 +466,57 @@ export default function QueueControl() {
           </div>
         )}
 
+        {/* Confirmed Appointments (Not Yet Checked In) */}
+        {queue && queue.confirmed && queue.confirmed.length > 0 && (
+          <div className="space-y-3 rounded-xl bg-white p-4 shadow-sm border-l-4 border-amber-500">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Confirmed Appointments</h3>
+                <p className="mt-0.5 text-xs text-slate-500">Not yet checked in</p>
+              </div>
+              <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
+                {queue.confirmed.length}
+              </span>
+            </div>
+            
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
+              {queue.confirmed.slice(0, 20).map((entry) => {
+                const isCheckedIn = entry.status === 'queued' || entry.status === 'called' || entry.status === 'in_service';
+                return (
+                  <div 
+                    key={entry._id}
+                    className={`relative p-2.5 rounded-lg border text-white transition-all text-center ${
+                      isCheckedIn ? 'ring-2 ring-green-400 brightness-125 border-transparent' : 'opacity-60 border-slate-200'
+                    }`}
+                    style={{ 
+                      backgroundColor: entry.tokenColor || '#64748b'
+                    }}
+                  >
+                    {/* Blur overlay for unchecked-in tokens */}
+                    {!isCheckedIn && (
+                      <div className="absolute inset-0 rounded-lg bg-white/10 backdrop-blur-sm pointer-events-none"></div>
+                    )}
+                    
+                    {/* Content */}
+                    <div className="relative z-10 space-y-0.5">
+                      <p className="text-base font-bold leading-tight">{entry.tokenLabel}</p>
+                      {isCheckedIn && <p className="text-xs font-bold">✓</p>}
+                      <p className="text-xs truncate leading-tight opacity-90">{entry.customerName || 'Customer'}</p>
+                      <p className="text-xs truncate leading-tight opacity-75">{entry.serviceCode}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            
+            {queue.confirmed.length > 20 && (
+              <p className="text-center text-xs text-slate-500">
+                Showing 20 of {queue.confirmed.length}
+              </p>
+            )}
+          </div>
+        )}
+
         {/* Active Waiting List */}
         {queue && queue.waiting && queue.waiting.length > 0 && (
           <div className="space-y-4 rounded-xl bg-white p-6 shadow-sm">
@@ -506,17 +570,19 @@ export default function QueueControl() {
                     )
                     .slice(0, 15)
                     .map((entry, index) => (
-                    <tr key={entry._id} className="hover:bg-slate-50 transition-colors">
+                    <tr key={entry._id} className="hover:bg-slate-50 transition-colors relative group">
                       <td className="px-4 py-3">
                         <span 
-                          className="font-bold px-3 py-1 rounded text-white inline-block"
-                          style={{ 
-                            backgroundColor: entry.priority === 'emergency' ? priorityColors.emergency : 
-                                           entry.priority === 'high' ? priorityColors.vip : 
-                                           priorityColors.standard
-                          }}
+                          className={`font-bold px-3 py-1 rounded text-white inline-block transition-all ${
+                            entry.status === 'queued' || entry.status === 'called' || entry.status === 'in_service' 
+                              ? 'ring-2 ring-green-400 brightness-110' 
+                              : ''
+                          }`}
+                          style={{ backgroundColor: entry.tokenColor || '#0f766e' }}
+                          title={entry.status === 'queued' ? '✓ Checked In' : 'Not Checked In'}
                         >
                           {entry.tokenLabel}
+                          {(entry.status === 'queued' || entry.status === 'called' || entry.status === 'in_service') && '  ✓'}
                         </span>
                       </td>
                       <td className="px-4 py-3">
@@ -706,6 +772,19 @@ export default function QueueControl() {
           onSave={handleSaveColors}
           isBusy={colorPickerBusy}
         /> */}
+
+        {/* Token Color Picker Modal */}
+        <TokenColorPickerModal 
+          isOpen={showColorPickerModal}
+          onClose={() => {
+            setShowColorPickerModal(false);
+            setSelectedAppointmentForColor(null);
+          }}
+          appointment={selectedAppointmentForColor}
+          onColorUpdated={(updated) => {
+            loadQueue();
+          }}
+        />
       </div>
     </AdminLayout>
   );

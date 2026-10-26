@@ -57,10 +57,10 @@ export default function QueueDisplayPage() {
   useEffect(() => { refresh(); }, [refresh]);
 
   return (
-    <main className="min-h-screen bg-slate-950 px-3 py-4 text-white sm:px-6 sm:py-6">
+    <main className="min-h-screen bg-slate-950 px-3 py-4 text-white sm:px-6 sm:py-6 flex flex-col">
       <Toaster position="top-right" />
-      <div className="mx-auto max-w-7xl">
-        <header className="mb-4 flex flex-wrap items-center justify-between gap-4 px-1">
+      <div className="mx-auto max-w-7xl w-full flex flex-col flex-1">
+        <header className="mb-4 flex flex-wrap items-center justify-between gap-4 px-1 shrink-0">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-teal-300 sm:text-xs">Smart Queue · Live monitor</p>
             <h1 className="mt-1 text-xl font-bold sm:text-2xl">Currently serving</h1>
@@ -72,7 +72,7 @@ export default function QueueDisplayPage() {
           </div>
         </header>
 
-        <section className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-slate-800 bg-slate-900 p-3">
+        <section className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-slate-800 bg-slate-900 p-3 shrink-0">
             <select disabled={loadingProviders || providers.length === 0} value={providerId} onChange={event => {
               const selected = providers.find(item => item._id === event.target.value);
               setProviderId(event.target.value);
@@ -90,25 +90,27 @@ export default function QueueDisplayPage() {
             <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-xs text-slate-300">
               <span><strong className="text-white">{queueServices.length}</strong> services</span>
               <span><strong className="text-white">{queue?.waitingCount ?? 0}</strong> waiting</span>
-              <span><strong className="text-amber-300">{queue?.confirmed ?? 0}</strong> confirmed not checked in</span>
+              <span><strong className="text-amber-300">{queue?.confirmedCount ?? 0}</strong> confirmed not checked in</span>
             </div>
         </section>
 
-        {loadingProviders ? (
-          <div className="flex min-h-28 items-center justify-center rounded-xl bg-white text-sm text-slate-500">Loading live queue…</div>
-        ) : providers.length === 0 ? (
-          <div className="rounded-xl bg-white px-6 py-8 text-center text-slate-700">
-            <p className="font-semibold">No active service locations are configured.</p>
-            <p className="mt-2 text-sm text-slate-500">Add a location and at least one service in the admin service management screen to start displaying queues.</p>
-          </div>
-        ) : !serviceCode ? (
-          <div className="rounded-xl bg-white px-6 py-8 text-center text-slate-700">
-            <p className="font-semibold">No services are configured for {provider?.name || 'this location'}.</p>
-            <p className="mt-2 text-sm text-slate-500">Add a service to this location to display its live queue.</p>
-          </div>
-        ) : (
-          <LiveQueueBoard queue={queue} connected={connected} colors={queueColors} priorityColors={priorityColors} providerName={provider?.name} serviceName={serviceCode} />
-        )}
+        <div className="flex-1 min-h-0">
+          {loadingProviders ? (
+            <div className="flex min-h-28 items-center justify-center rounded-xl bg-white text-sm text-slate-500">Loading live queue…</div>
+          ) : providers.length === 0 ? (
+            <div className="rounded-xl bg-white px-6 py-8 text-center text-slate-700">
+              <p className="font-semibold">No active service locations are configured.</p>
+              <p className="mt-2 text-sm text-slate-500">Add a location and at least one service in the admin service management screen to start displaying queues.</p>
+            </div>
+          ) : !serviceCode ? (
+            <div className="rounded-xl bg-white px-6 py-8 text-center text-slate-700">
+              <p className="font-semibold">No services are configured for {provider?.name || 'this location'}.</p>
+              <p className="mt-2 text-sm text-slate-500">Add a service to this location to display its live queue.</p>
+            </div>
+          ) : (
+            <LiveQueueBoard queue={queue} connected={connected} colors={queueColors} priorityColors={priorityColors} providerName={provider?.name} serviceName={serviceCode} />
+          )}
+        </div>
       </div>
     </main>
   );
