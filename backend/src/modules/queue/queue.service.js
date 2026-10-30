@@ -58,11 +58,11 @@ export const getQueueSnapshot = async ({ providerId, branchCode, serviceCode, qu
   let sortOrder;
   
   if (priorityStrategy === 'Priority-Based') {
-    // Priority-based: emergency first, then VIP, then normal. Within each priority, FIFO by token
-    sortOrder = { priorityScore: 1, tokenNumber: 1, createdAt: 1 };
+    // Priority-based: emergency first, then VIP, then normal. Within each priority, FIFO by check-in time
+    sortOrder = { priorityScore: 1, tokenNumber: 1, queueJoinedAt: 1 };
   } else {
-    // FIFO (default): strict first-in-first-out, ignore priority
-    sortOrder = { tokenNumber: 1, createdAt: 1 };
+    // FIFO (default): strict first-in-first-out based on check-in order, ignore priority
+    sortOrder = { tokenNumber: 1, queueJoinedAt: 1 };
   }
   
   const [session, current, waiting, confirmedAppointments, confirmed, total, showCustomerNames, callingMethod] = await Promise.all([
@@ -74,14 +74,14 @@ export const getQueueSnapshot = async ({ providerId, branchCode, serviceCode, qu
     // scans QR code or staff manually checks them in.
     Appointment.find({ ...scope, status: 'queued', tokenNumber: { $gt: 0 } })
       .sort(sortOrder)
-      .select('tokenNumber tokenLabel serviceCode customerName status priority createdAt estimatedWaitMinutes assignedCounterNumber tokenColor').lean(),
+      .select('tokenNumber tokenLabel serviceCode customerName status priority queueJoinedAt estimatedWaitMinutes assignedCounterNumber tokenColor').lean(),
     // Count confirmed appointments (not yet checked-in)
     // Note: tokenNumber should be set on confirmation, but we count all confirmed just in case
     Appointment.countDocuments({ ...scope, status: 'confirmed' }),
     // Get all confirmed appointments (not yet checked-in)
     Appointment.find({ ...scope, status: 'confirmed', tokenNumber: { $gt: 0 } })
       .sort(sortOrder)
-      .select('tokenNumber tokenLabel serviceCode customerName status priority createdAt estimatedWaitMinutes assignedCounterNumber tokenColor _id').lean(),
+      .select('tokenNumber tokenLabel serviceCode customerName status priority queueJoinedAt estimatedWaitMinutes assignedCounterNumber tokenColor _id').lean(),
     Appointment.countDocuments({ ...scope, status: { $nin: ['cancelled', 'no_show'] } }),
     Setting.get('queue_show_customer_names', false),
     Setting.get('queue_calling_method', 'all_counters'),
@@ -137,11 +137,11 @@ export const callNext = async ({ providerId, branchCode, queueDate = new Date() 
   let sortOrder;
   
   if (priorityStrategy === 'Priority-Based') {
-    // Priority-based: emergency first, then VIP, then normal. Within each priority, FIFO by token
-    sortOrder = { priorityScore: 1, tokenNumber: 1, createdAt: 1 };
+    // Priority-based: emergency first, then VIP, then normal. Within each priority, FIFO by check-in time
+    sortOrder = { priorityScore: 1, tokenNumber: 1, queueJoinedAt: 1 };
   } else {
-    // FIFO (default): strict first-in-first-out, ignore priority
-    sortOrder = { tokenNumber: 1, createdAt: 1 };
+    // FIFO (default): strict first-in-first-out based on check-in order, ignore priority
+    sortOrder = { tokenNumber: 1, queueJoinedAt: 1 };
   }
   
   // Determine calling method and assign counter if needed

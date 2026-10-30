@@ -2,7 +2,16 @@ import { Activity, Clock3, Users } from 'lucide-react';
 
 const token = (entry) => entry?.tokenLabel || (entry?.tokenNumber ? `Q${entry.tokenNumber}` : '—');
 
-export default function LiveQueueBoard({ queue, connected = false, colors = {}, priorityColors = {}, providerName = '', serviceName = '' }) {
+export default function LiveQueueBoard({ 
+  queue, 
+  connected = false, 
+  colors = {}, 
+  priorityColors = {}, 
+  getColorForPriority = (p) => priorityColors[p] || priorityColors.standard,
+  getContrastText = () => '#ffffff',
+  providerName = '', 
+  serviceName = '' 
+}) {
   if (!queue) {
     return <div className="flex min-h-24 items-center justify-center rounded-xl bg-white p-8 text-center text-sm text-slate-500">Choose a service location to display its queue.</div>;
   }
@@ -105,15 +114,15 @@ export default function LiveQueueBoard({ queue, connected = false, colors = {}, 
                 <h3 className="text-sm font-semibold">Waiting tokens</h3>
                 <div className="flex items-center gap-2 mt-1">
                   <div className="flex items-center gap-1 text-xs">
-                    <div className="w-2 h-2 rounded" style={{ backgroundColor: priorityColors.standard || '#64748b' }}></div>
+                    <div className="w-2 h-2 rounded" style={{ backgroundColor: getColorForPriority('standard') }}></div>
                     <span>Standard</span>
                   </div>
                   <div className="flex items-center gap-1 text-xs">
-                    <div className="w-2 h-2 rounded" style={{ backgroundColor: priorityColors.vip || '#f59e0b' }}></div>
+                    <div className="w-2 h-2 rounded" style={{ backgroundColor: getColorForPriority('vip') }}></div>
                     <span>VIP</span>
                   </div>
                   <div className="flex items-center gap-1 text-xs">
-                    <div className="w-2 h-2 rounded" style={{ backgroundColor: priorityColors.emergency || '#ef4444' }}></div>
+                    <div className="w-2 h-2 rounded" style={{ backgroundColor: getColorForPriority('emergency') }}></div>
                     <span>Emergency</span>
                   </div>
                 </div>
@@ -122,11 +131,7 @@ export default function LiveQueueBoard({ queue, connected = false, colors = {}, 
             </div>
             <ol className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
               {queue.waiting.map((entry) => {
-                const bgColor = entry.tokenColor || (
-                  entry.priority === 'emergency' ? priorityColors.emergency : 
-                  entry.priority === 'high' ? priorityColors.vip : 
-                  priorityColors.standard
-                );
+                const bgColor = getColorForPriority(entry.priority);
                 const isCheckedIn = entry.status === 'queued' || entry.status === 'called' || entry.status === 'in_service';
                 const priorityLabel = entry.priority === 'emergency' ? '⚡' : 
                                      entry.priority === 'high' ? '👑' : 
@@ -137,10 +142,13 @@ export default function LiveQueueBoard({ queue, connected = false, colors = {}, 
                   }`}>
                     <div className="flex items-center gap-1 min-w-0">
                       <span 
-                        className={`font-bold px-1.5 py-0.5 rounded text-white text-xs transition-all relative shrink-0 ${
+                        className={`font-bold px-1.5 py-0.5 rounded text-xs transition-all relative shrink-0 ${
                           isCheckedIn ? 'ring-1 ring-green-400 brightness-110' : ''
                         }`}
-                        style={{ backgroundColor: bgColor }}
+                        style={{ 
+                          backgroundColor: bgColor,
+                          color: getContrastText(bgColor)
+                        }}
                       >
                         {isCheckedIn && (
                           <div className="absolute inset-0 rounded bg-white/10 backdrop-blur-sm"></div>

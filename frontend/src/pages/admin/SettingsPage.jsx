@@ -242,7 +242,7 @@ export default function SettingsPage() {
 
   const grouped = GROUPS.map(g => ({
     ...g,
-    items: settings.filter(s => s.group === g.id),
+    items: settings.filter(s => s.group === g.id && !s.key.startsWith('priority_color_')),
   }));
 
   const setValue = (key, val) => setValues(v => ({ ...v, [key]: val }));

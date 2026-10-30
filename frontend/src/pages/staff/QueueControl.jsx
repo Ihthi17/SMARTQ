@@ -9,13 +9,13 @@ import { servicesForChannel } from '../../utils/serviceCatalog';
 import NotificationCenter from '../../components/notifications/NotificationCenter';
 import { WaitingCustomersList } from '../../components/queue/WaitingCustomersList';
 import { QueueColorPicker } from '../../components/queue/QueueColorPicker';
-import { TokenColorPickerModal } from '../../components/queue/TokenColorPickerModal';
 import { EnhancedQueueDisplay } from '../../components/queue/EnhancedQueueDisplay';
 
 export default function QueueControl() {
   const { user, permissions } = useContext(AuthContext);
   const canManageQueue = user?.role === 'SUPER_ADMIN' || permissions.includes('queue.manage');
   const canManageAppointments = user?.role === 'SUPER_ADMIN' || permissions.includes('appointments.manage');
+  
   const [providers, setProviders] = useState([]);
   const [providerId, setProviderId] = useState('');
   const [serviceCode, setServiceCode] = useState('');
@@ -25,8 +25,7 @@ export default function QueueControl() {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showPriorityColorPicker, setShowPriorityColorPicker] = useState(false);
   const [colorPickerBusy, setColorPickerBusy] = useState(false);
-  const [showColorPickerModal, setShowColorPickerModal] = useState(false);
-  const [selectedAppointmentForColor, setSelectedAppointmentForColor] = useState(null);
+  const [priorityColorEdits, setPriorityColorEdits] = useState({ standard: '#64748b', vip: '#f59e0b', emergency: '#ef4444' });
   const [busy, setBusy] = useState('');
   const [queueStats, setQueueStats] = useState({ startTime: null, currentStartTime: null, elapsed: 0, serviceElapsed: 0 });
   const [scanQRMode, setScanQRMode] = useState(false);
@@ -41,6 +40,44 @@ export default function QueueControl() {
   const services = useMemo(() => servicesForChannel(provider, 'queue'), [provider]);
   const queueDate = new Date().toISOString().split('T')[0]; // Pass today's date to ensure consistency
   const { queue, connected } = useQueueSocket(providerId, branchCode, serviceCode, queueDate, initialQueue);
+
+  // Helper function to get priority color
+  const getColorForPriority = (priority) => {
+    if (!priority) return priorityColors.standard;
+    const normalized = String(priority).toLowerCase();
+    
+    // Map backend priority values to color keys
+    const priorityMap = {
+      'normal': 'standard',
+      'standard': 'standard',
+      'high': 'vip',
+      'vip': 'vip',
+      'emergency': 'emergency'
+    };
+    
+    const colorKey = priorityMap[normalized] || 'standard';
+    return priorityColors[colorKey] || priorityColors.standard;
+  };
+
+  // Helper function to get contrast text color
+  const getContrastText = (backgroundColor) => {
+    if (!backgroundColor || typeof backgroundColor !== 'string') return '#ffffff';
+    try {
+      const hex = backgroundColor.replace('#', '');
+      if (hex.length !== 6) return '#ffffff';
+      const r = parseInt(hex.substring(0, 2), 16) / 255;
+      const g = parseInt(hex.substring(2, 4), 16) / 255;
+      const b = parseInt(hex.substring(4, 6), 16) / 255;
+      if (isNaN(r) || isNaN(g) || isNaN(b)) return '#ffffff';
+      const luminance = 0.299 * (r > 0.03928 ? Math.pow(r / 12.92, 2.4) : r / 12.92) +
+        0.587 * (g > 0.03928 ? Math.pow(g / 12.92, 2.4) : g / 12.92) +
+        0.114 * (b > 0.03928 ? Math.pow(b / 12.92, 2.4) : b / 12.92);
+      return luminance > 0.5 ? '#000000' : '#ffffff';
+    } catch (err) {
+      console.error('Error calculating contrast text:', err);
+      return '#ffffff';
+    }
+  };
 
   // Load providers and colors
   useEffect(() => {
@@ -578,7 +615,10 @@ export default function QueueControl() {
                               ? 'ring-2 ring-green-400 brightness-110' 
                               : ''
                           }`}
-                          style={{ backgroundColor: entry.tokenColor || '#0f766e' }}
+                          style={{ 
+                            backgroundColor: getColorForPriority(entry.priority),
+                            color: getContrastText(getColorForPriority(entry.priority))
+                          }}
                           title={entry.status === 'queued' ? '✓ Checked In' : 'Not Checked In'}
                         >
                           {entry.tokenLabel}
@@ -708,11 +748,11 @@ export default function QueueControl() {
                   <div className="flex items-center gap-3">
                     <input
                       type="color"
-                      value={priorityColors.standard}
-                      onChange={(e) => setPriorityColors({ ...priorityColors, standard: e.target.value })}
+                      value={priorityColorEdits.standard}
+                      onChange={(e) => setPriorityColorEdits({ ...priorityColorEdits, standard: e.target.value })}
                       className="h-10 w-16 rounded border border-slate-300 cursor-pointer"
                     />
-                    <span className="text-sm text-slate-600">{priorityColors.standard}</span>
+                    <span className="text-sm text-slate-600">{priorityColorEdits.standard}</span>
                   </div>
                 </div>
 
@@ -722,11 +762,11 @@ export default function QueueControl() {
                   <div className="flex items-center gap-3">
                     <input
                       type="color"
-                      value={priorityColors.vip}
-                      onChange={(e) => setPriorityColors({ ...priorityColors, vip: e.target.value })}
+                      value={priorityColorEdits.vip}
+                      onChange={(e) => setPriorityColorEdits({ ...priorityColorEdits, vip: e.target.value })}
                       className="h-10 w-16 rounded border border-slate-300 cursor-pointer"
                     />
-                    <span className="text-sm text-slate-600">{priorityColors.vip}</span>
+                    <span className="text-sm text-slate-600">{priorityColorEdits.vip}</span>
                   </div>
                 </div>
 
@@ -736,11 +776,11 @@ export default function QueueControl() {
                   <div className="flex items-center gap-3">
                     <input
                       type="color"
-                      value={priorityColors.emergency}
-                      onChange={(e) => setPriorityColors({ ...priorityColors, emergency: e.target.value })}
+                      value={priorityColorEdits.emergency}
+                      onChange={(e) => setPriorityColorEdits({ ...priorityColorEdits, emergency: e.target.value })}
                       className="h-10 w-16 rounded border border-slate-300 cursor-pointer"
                     />
-                    <span className="text-sm text-slate-600">{priorityColors.emergency}</span>
+                    <span className="text-sm text-slate-600">{priorityColorEdits.emergency}</span>
                   </div>
                 </div>
               </div>
@@ -753,7 +793,7 @@ export default function QueueControl() {
                   Cancel
                 </button>
                 <button
-                  onClick={() => handleSavePriorityColors(priorityColors)}
+                  onClick={() => handleSavePriorityColors(priorityColorEdits)}
                   disabled={colorPickerBusy}
                   className="flex-1 rounded-lg bg-teal-700 px-4 py-2 text-sm font-medium text-white hover:bg-teal-800 disabled:opacity-50"
                 >
@@ -772,19 +812,6 @@ export default function QueueControl() {
           onSave={handleSaveColors}
           isBusy={colorPickerBusy}
         /> */}
-
-        {/* Token Color Picker Modal */}
-        <TokenColorPickerModal 
-          isOpen={showColorPickerModal}
-          onClose={() => {
-            setShowColorPickerModal(false);
-            setSelectedAppointmentForColor(null);
-          }}
-          appointment={selectedAppointmentForColor}
-          onColorUpdated={(updated) => {
-            loadQueue();
-          }}
-        />
       </div>
     </AdminLayout>
   );

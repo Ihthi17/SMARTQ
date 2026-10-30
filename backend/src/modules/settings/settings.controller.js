@@ -24,6 +24,7 @@ const isValidBrandAsset = (value) => {
 const isValidSettingValue = (definition, value) => {
   if (definition.key.startsWith('brand_')) return isValidBrandAsset(value);
   if (definition.key.startsWith('queue_color_')) return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
+  if (definition.key.startsWith('priority_color_')) return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
   if (typeof definition.value === 'boolean') return typeof value === 'boolean';
   if (typeof definition.value === 'number') return Number.isSafeInteger(value) && value >= 0;
   if (definition.key === 'appointment_holidays') {
@@ -46,16 +47,25 @@ const isValidSettingValue = (definition, value) => {
 
 export const getBranding = async (req, res, next) => {
   try {
-    const [appName, favicon, logo, currentColor, nextColor, accentColor] = await Promise.all([
+    const [appName, favicon, logo, currentColor, nextColor, accentColor, standardColor, vipColor, emergencyColor] = await Promise.all([
       Setting.get('app_name', 'Smart Queue'),
       Setting.get('brand_favicon', ''),
       req.query.includeLogo === 'false' ? '' : Setting.get('brand_logo', ''),
       Setting.get('queue_color_current', '#0f766e'),
       Setting.get('queue_color_next', '#7c3aed'),
       Setting.get('queue_color_accent', '#0d9488'),
+      Setting.get('priority_color_standard', '#64748b'),
+      Setting.get('priority_color_vip', '#f59e0b'),
+      Setting.get('priority_color_emergency', '#ef4444'),
     ]);
     res.set('Cache-Control', 'no-store');
-    return res.json({ appName, logo, favicon, queueColors: { current: currentColor, next: nextColor, accent: accentColor } });
+    return res.json({ 
+      appName, 
+      logo, 
+      favicon, 
+      queueColors: { current: currentColor, next: nextColor, accent: accentColor },
+      priorityColors: { standard: standardColor, vip: vipColor, emergency: emergencyColor },
+    });
   } catch (err) { next(err); }
 };
 

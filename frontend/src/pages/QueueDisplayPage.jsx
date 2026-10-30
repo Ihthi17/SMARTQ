@@ -14,6 +14,45 @@ export default function QueueDisplayPage() {
   const [loadingProviders, setLoadingProviders] = useState(true);
   const [queueColors, setQueueColors] = useState({ current: '#0f766e', next: '#7c3aed', accent: '#0d9488' });
   const [priorityColors, setPriorityColors] = useState({ standard: '#64748b', vip: '#f59e0b', emergency: '#ef4444' });
+  
+  // Helper function to get priority color
+  const getColorForPriority = (priority) => {
+    if (!priority) return priorityColors.standard;
+    const normalized = String(priority).toLowerCase();
+    
+    // Map backend priority values to color keys
+    const priorityMap = {
+      'normal': 'standard',
+      'standard': 'standard',
+      'high': 'vip',
+      'vip': 'vip',
+      'emergency': 'emergency'
+    };
+    
+    const colorKey = priorityMap[normalized] || 'standard';
+    return priorityColors[colorKey] || priorityColors.standard;
+  };
+
+  // Helper function to get contrast text color
+  const getContrastText = (backgroundColor) => {
+    if (!backgroundColor || typeof backgroundColor !== 'string') return '#ffffff';
+    try {
+      const hex = backgroundColor.replace('#', '');
+      if (hex.length !== 6) return '#ffffff';
+      const r = parseInt(hex.substring(0, 2), 16) / 255;
+      const g = parseInt(hex.substring(2, 4), 16) / 255;
+      const b = parseInt(hex.substring(4, 6), 16) / 255;
+      if (isNaN(r) || isNaN(g) || isNaN(b)) return '#ffffff';
+      const luminance = 0.299 * (r > 0.03928 ? Math.pow(r / 12.92, 2.4) : r / 12.92) +
+        0.587 * (g > 0.03928 ? Math.pow(g / 12.92, 2.4) : g / 12.92) +
+        0.114 * (b > 0.03928 ? Math.pow(b / 12.92, 2.4) : b / 12.92);
+      return luminance > 0.5 ? '#000000' : '#ffffff';
+    } catch (err) {
+      console.error('Error calculating contrast text:', err);
+      return '#ffffff';
+    }
+  };
+  
   const provider = providers.find(item => item._id === providerId);
   const queueServices = servicesForChannel(provider, 'queue');
   const branchCode = provider?.branch?.code || provider?.code || '';
@@ -39,7 +78,6 @@ export default function QueueDisplayPage() {
     api.get('/settings/branding', { params: { includeLogo: false } })
       .then(({ data }) => { 
         if (data.queueColors) setQueueColors(data.queueColors);
-        if (data.priorityColors) setPriorityColors(data.priorityColors);
       })
       .catch(error => console.error('Could not load queue display colors:', error));
   }, []);
@@ -55,6 +93,17 @@ export default function QueueDisplayPage() {
   }, [providerId, branchCode, serviceCode]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // Auto-refresh queue every 3 seconds
+  useEffect(() => {
+    if (!providerId || !serviceCode) return;
+    
+    const interval = setInterval(() => {
+      refresh();
+    }, 3000);
+    
+    return () => clearInterval(interval);
+  }, [providerId, serviceCode, refresh]);
 
   return (
     <main className="min-h-screen bg-slate-950 px-3 py-4 text-white sm:px-6 sm:py-6 flex flex-col">
@@ -108,7 +157,16 @@ export default function QueueDisplayPage() {
               <p className="mt-2 text-sm text-slate-500">Add a service to this location to display its live queue.</p>
             </div>
           ) : (
-            <LiveQueueBoard queue={queue} connected={connected} colors={queueColors} priorityColors={priorityColors} providerName={provider?.name} serviceName={serviceCode} />
+            <LiveQueueBoard 
+              queue={queue} 
+              connected={connected} 
+              colors={queueColors} 
+              priorityColors={priorityColors}
+              getColorForPriority={getColorForPriority}
+              getContrastText={getContrastText}
+              providerName={provider?.name} 
+              serviceName={serviceCode} 
+            />
           )}
         </div>
       </div>
